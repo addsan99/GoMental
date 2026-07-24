@@ -61,3 +61,18 @@ export type MoveNoteRequest = {
   id: string
   newId: string
 }
+
+export type GoMentalSettings = {
+  version: number
+  appearance: {
+    theme: 'light' | 'dark'
+  }
+  noteView: {
+    defaultEditMode: 'rich' | 'source'
+    showFindBar: boolean
+  }
+  graphView: {
+    defaultMode: '2d' | '3d'
+    defaultDepth: number
+  }
+}

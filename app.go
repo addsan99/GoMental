@@ -380,6 +380,14 @@ func (a *App) SaveUIState(state application.UIState) error {
 	return a.service().SaveUIState(a.context(), state)
 }
 
+func (a *App) LoadSettings() (application.Settings, error) {
+	return a.service().LoadSettings(a.context())
+}
+
+func (a *App) SaveSettings(settings application.Settings) error {
+	return a.service().SaveSettings(a.context(), settings)
+}
+
 // mustHost lazily constructs the desktop host (native dialogs enabled) on first use.
 func (a *App) mustHost() *apphost.Host {
 	a.mu.Lock()

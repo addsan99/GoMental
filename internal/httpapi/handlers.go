@@ -355,3 +355,26 @@ func (s *Server) handleSaveUIState(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "saved"})
 }
+
+// GET /api/settings
+func (s *Server) handleLoadSettings(w http.ResponseWriter, r *http.Request) {
+	settings, err := s.service().LoadSettings(r.Context())
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, settings)
+}
+
+// PUT /api/settings
+func (s *Server) handleSaveSettings(w http.ResponseWriter, r *http.Request) {
+	var settings application.Settings
+	if !decodeJSON(w, r, &settings) {
+		return
+	}
+	if err := s.service().SaveSettings(r.Context(), settings); err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "saved"})
+}

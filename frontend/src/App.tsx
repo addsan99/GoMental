@@ -1,5 +1,5 @@
 import {lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState} from 'react';
-import type {CSSProperties, PointerEvent as ReactPointerEvent} from 'react';
+import type {CSSProperties, PointerEvent as ReactPointerEvent, ReactNode} from 'react';
 import './App.css';
 import type {MdxNoteEditorHandle} from './MdxNoteEditor';
 import type {CodeMirrorEditorHandle} from './CodeMirrorEditor';
@@ -23,6 +23,7 @@ import {
   TrashIcon,
   EditIcon,
   FolderIcon,
+  GearIcon,
   GraphTabIcon,
   ImportIcon,
   LinkIcon,
@@ -42,6 +43,7 @@ import {
   ImportURL,
   ListNotes,
   LoadNoteAssetDataURL,
+  LoadSettings,
   LoadUIState,
   MoveNote,
   OpenWorkspace,
@@ -50,13 +52,14 @@ import {
   RecentWorkspaces,
   SaveNote,
   SaveNoteAsset,
+  SaveSettings,
   SaveUIState,
   Search,
   SelectWorkspaceDirectory,
   onEvent,
 } from './transport';
 import type {application} from '../wailsjs/go/models';
-import type {AppInfoWithMode, NoteDTOWithVersion} from './transport/types';
+import type {AppInfoWithMode, GoMentalSettings, NoteDTOWithVersion} from './transport/types';
 
 // Heavy views are code-split so they stay out of the initial bundle: the graph
 // canvas (sigma + graphology) and the two editors (@mdxeditor / CodeMirror) are
@@ -93,6 +96,7 @@ type SaveState = 'idle' | 'dirty' | 'saving' | 'saved' | 'conflict';
 type SearchStatus = 'idle' | 'searching' | 'ready' | 'error';
 type WorkspaceTab = 'note' | 'graph';
 type ThemeMode = 'light' | 'dark';
+type SettingsSection = 'appearance' | 'noteView' | 'graphView';
 type NoteTemplateID =
   | 'concept'
   | 'adr'
@@ -141,6 +145,21 @@ const emptyInfo: AppInfoWithMode = {
   name: 'GoMental',
   description: 'Local-first OKF notes and knowledge graph',
   phase: '',
+};
+
+const DEFAULT_SETTINGS: GoMentalSettings = {
+  version: 1,
+  appearance: {
+    theme: 'dark',
+  },
+  noteView: {
+    defaultEditMode: 'rich',
+    showFindBar: true,
+  },
+  graphView: {
+    defaultMode: '2d',
+    defaultDepth: 2,
+  },
 };
 
 function App() {
@@ -198,6 +217,10 @@ function App() {
   const [nav, setNav] = useState<{stack: string[]; index: number}>({stack: [], index: -1});
   const suppressHistoryRef = useRef(false);
   const [historyMenuOpen, setHistoryMenuOpen] = useState(false);
+  const [settings, setSettings] = useState<GoMentalSettings>(DEFAULT_SETTINGS);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [settingsSection, setSettingsSection] = useState<SettingsSection>('appearance');
+  const [settingsSaveState, setSettingsSaveState] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
 
   // New UI-only state for the redesigned shell.
   const [rawMode, setRawMode] = useState(false);
@@ -233,6 +256,29 @@ function App() {
     }
     toastTimerRef.current = setTimeout(() => setToastMsg(''), 1900);
   }, []);
+
+  const applySettingsToUI = useCallback((next: GoMentalSettings) => {
+    const normalized = normalizeSettings(next);
+    setSettings(normalized);
+    setTheme(normalized.appearance.theme);
+    setGraphMode(normalized.graphView.defaultMode);
+    setGraphDepth(normalized.graphView.defaultDepth);
+  }, []);
+
+  const persistSettings = useCallback((next: GoMentalSettings) => {
+    const normalized = normalizeSettings(next);
+    applySettingsToUI(normalized);
+    setSettingsSaveState('saving');
+    void SaveSettings(normalized)
+      .then(() => {
+        setSettingsSaveState('saved');
+        window.setTimeout(() => setSettingsSaveState('idle'), 1400);
+      })
+      .catch((err) => {
+        setSettingsSaveState('error');
+        setError(errorMessage(err));
+      });
+  }, [applySettingsToUI]);
 
   const loadRecent = useCallback(async () => {
     setRecent(await RecentWorkspaces());
@@ -509,10 +555,10 @@ function App() {
       try {
         const appInfo = (await Info()) as AppInfoWithMode;
         setInfo(appInfo);
-        const state = await LoadUIState();
+        const [state, loadedSettings] = await Promise.all([LoadUIState(), LoadSettings()]);
+        const appSettings = normalizeSettings(loadedSettings);
+        applySettingsToUI(appSettings);
         const lastNote = typeof state.lastNote === 'string' ? state.lastNote : '';
-        const storedTheme = readUIStateTheme(state.theme);
-        setTheme(storedTheme);
         // In server mode the SPA must open the server's *configured* workspace,
         // not a path remembered from a different session/machine. Opening a
         // mismatched root returns 403 and would strand the user on the empty
@@ -537,7 +583,7 @@ function App() {
         setError(errorMessage(err));
       }
     })();
-  }, [loadRecent, openWorkspace]);
+  }, [applySettingsToUI, loadRecent, openWorkspace]);
 
   // Warm the editor chunks during idle time once the shell is interactive, so
   // the first switch into edit mode never stalls on a lazy fetch. The graph
@@ -933,13 +979,13 @@ function App() {
     setConflictOpen(false);
   }, [savedContent]);
 
-  // Enter the rich-text (WYSIWYG) editor. Distinct from source mode so both
-  // representations are reachable; switching between them keeps isEditing set.
+  // Enter the editor using the saved Note View preference. The source toggle
+  // below still switches representations without dropping the draft.
   const startRichEdit = useCallback(() => {
     setActiveTab('note');
-    setRawMode(false);
+    setRawMode(settings.noteView.defaultEditMode === 'source');
     setIsEditing(true);
-  }, []);
+  }, [settings.noteView.defaultEditMode]);
 
   // Toggle between rich (WYSIWYG) and raw markdown (CodeMirror) while editing.
   // The draft is shared between both editors (handleDraftChange), so flipping
@@ -1154,19 +1200,12 @@ function App() {
   }, [paletteOpen, linkPickerOpen, isEditing, rawMode, openLinkPicker]);
 
   const toggleTheme = useCallback(() => {
-    setTheme((current) => {
-      const next = current === 'dark' ? 'light' : 'dark';
-      try {
-        localStorage.setItem('gm-theme', next);
-      } catch {
-        // Ignore storage failures (private mode, etc.).
-      }
-      if (workspace?.root) {
-        void SaveUIState({lastWorkspace: workspace.root, lastNote: selectedID, theme: next}).catch((err) => setError(errorMessage(err)));
-      }
-      return next;
-    });
-  }, [selectedID, workspace?.root]);
+    const nextTheme = theme === 'dark' ? 'light' : 'dark';
+    persistSettings({...settings, appearance: {...settings.appearance, theme: nextTheme}});
+    if (workspace?.root) {
+      void SaveUIState({lastWorkspace: workspace.root, lastNote: selectedID, theme: nextTheme}).catch((err) => setError(errorMessage(err)));
+    }
+  }, [persistSettings, selectedID, settings, theme, workspace?.root]);
 
   const toggleFolder = useCallback((name: string) => {
     setExpanded((current) => ({...current, [name]: current[name] === false ? true : false}));
@@ -1235,6 +1274,9 @@ function App() {
         </button>
         <button type="button" className="gm-btn gm-btn-icon" onClick={toggleTheme} title="Toggle theme">
           {theme === 'dark' ? <SunIcon size={17} /> : <MoonIcon size={17} />}
+        </button>
+        <button type="button" className="gm-btn gm-btn-icon" onClick={() => setSettingsOpen(true)} title="Settings" aria-label="Settings">
+          <GearIcon size={17} />
         </button>
       </header>
 
@@ -1665,7 +1707,7 @@ function App() {
             </div>
           ) : selectedNoteReady && selectedNote ? (
             <div className="gm-article-scroll scroll" ref={articleScrollRef}>
-              <FindBar containerRef={articleScrollRef} contentKey={selectedID} />
+              {settings.noteView.showFindBar && <FindBar containerRef={articleScrollRef} contentKey={selectedID} />}
               <MarkdownArticle model={article} tags={selectedTags} noteID={selectedID} onNavigate={navigateToNote} theme={theme} />
             </div>
           ) : workspace && selectedID ? (
@@ -1808,6 +1850,15 @@ function App() {
 
       <CommandPalette open={paletteOpen} notes={notes} onClose={() => setPaletteOpen(false)} onSelect={selectFromPalette} />
       <LinkPicker open={linkPickerOpen} notes={notes} onClose={() => setLinkPickerOpen(false)} onPick={insertLink} />
+      <SettingsModal
+        open={settingsOpen}
+        settings={settings}
+        activeSection={settingsSection}
+        saveState={settingsSaveState}
+        onClose={() => setSettingsOpen(false)}
+        onSectionChange={setSettingsSection}
+        onChange={persistSettings}
+      />
       <Toast message={toastMsg} />
     </div>
   );
@@ -1820,6 +1871,184 @@ function DetailRow({label, value}: {label: string; value: string}) {
     <div className="gm-detail-row">
       <span className="gm-detail-label">{label}</span>
       <span className="gm-detail-value">{value}</span>
+    </div>
+  );
+}
+
+function SettingsModal({
+  open,
+  settings,
+  activeSection,
+  saveState,
+  onClose,
+  onSectionChange,
+  onChange,
+}: {
+  open: boolean;
+  settings: GoMentalSettings;
+  activeSection: SettingsSection;
+  saveState: 'idle' | 'saving' | 'saved' | 'error';
+  onClose: () => void;
+  onSectionChange: (section: SettingsSection) => void;
+  onChange: (settings: GoMentalSettings) => void;
+}) {
+  useEffect(() => {
+    if (!open) {
+      return;
+    }
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        onClose();
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose, open]);
+
+  if (!open) {
+    return null;
+  }
+
+  const sections: {id: SettingsSection; label: string}[] = [
+    {id: 'appearance', label: 'Appearance'},
+    {id: 'noteView', label: 'Note View'},
+    {id: 'graphView', label: 'Graph View'},
+  ];
+  const saveLabel = saveState === 'saving' ? 'Saving...' : saveState === 'saved' ? 'Saved' : saveState === 'error' ? 'Could not save' : 'Auto-saved';
+
+  return (
+    <div className="gm-settings-scrim" onClick={onClose} role="presentation">
+      <div className="gm-settings-modal" onClick={(event) => event.stopPropagation()} role="dialog" aria-modal="true" aria-label="Settings">
+        <header className="gm-settings-header">
+          <div>
+            <h2>Settings</h2>
+            <p>Stored as app-level JSON in GoMental.Settings.json.</p>
+          </div>
+          <div className="gm-settings-header-actions">
+            <span className={saveState === 'error' ? 'gm-settings-save error' : 'gm-settings-save'}>{saveLabel}</span>
+            <button type="button" className="gm-btn gm-btn-icon" onClick={onClose} title="Close settings" aria-label="Close settings">
+              <CloseIcon size={15} />
+            </button>
+          </div>
+        </header>
+        <div className="gm-settings-body">
+          <nav className="gm-settings-nav" aria-label="Settings sections">
+            {sections.map((section) => (
+              <button
+                type="button"
+                key={section.id}
+                className={activeSection === section.id ? 'gm-settings-nav-item active' : 'gm-settings-nav-item'}
+                onClick={() => onSectionChange(section.id)}
+              >
+                {section.label}
+              </button>
+            ))}
+          </nav>
+          <section className="gm-settings-pane">
+            {activeSection === 'appearance' && (
+              <SettingsGroup title="Appearance">
+                <label className="gm-setting-row">
+                  <span>
+                    <strong>Theme</strong>
+                    <small>Changes the whole shell immediately.</small>
+                  </span>
+                  <select
+                    value={settings.appearance.theme}
+                    onChange={(event) => onChange({
+                      ...settings,
+                      appearance: {...settings.appearance, theme: event.target.value as ThemeMode},
+                    })}
+                  >
+                    <option value="dark">Dark</option>
+                    <option value="light">Light</option>
+                  </select>
+                </label>
+              </SettingsGroup>
+            )}
+            {activeSection === 'noteView' && (
+              <SettingsGroup title="Note View">
+                <label className="gm-setting-row">
+                  <span>
+                    <strong>Default editor</strong>
+                    <small>Used when opening a note for editing.</small>
+                  </span>
+                  <select
+                    value={settings.noteView.defaultEditMode}
+                    onChange={(event) => onChange({
+                      ...settings,
+                      noteView: {...settings.noteView, defaultEditMode: event.target.value as 'rich' | 'source'},
+                    })}
+                  >
+                    <option value="rich">Rich text</option>
+                    <option value="source">Markdown source</option>
+                  </select>
+                </label>
+                <label className="gm-setting-row gm-setting-row-checkbox">
+                  <span>
+                    <strong>Find bar</strong>
+                    <small>Show in the read-only note view.</small>
+                  </span>
+                  <input
+                    type="checkbox"
+                    checked={settings.noteView.showFindBar}
+                    onChange={(event) => onChange({
+                      ...settings,
+                      noteView: {...settings.noteView, showFindBar: event.target.checked},
+                    })}
+                  />
+                </label>
+              </SettingsGroup>
+            )}
+            {activeSection === 'graphView' && (
+              <SettingsGroup title="Graph View">
+                <label className="gm-setting-row">
+                  <span>
+                    <strong>Default mode</strong>
+                    <small>Choose the graph lens opened by default.</small>
+                  </span>
+                  <select
+                    value={settings.graphView.defaultMode}
+                    onChange={(event) => onChange({
+                      ...settings,
+                      graphView: {...settings.graphView, defaultMode: event.target.value as '2d' | '3d'},
+                    })}
+                  >
+                    <option value="2d">2D</option>
+                    <option value="3d">3D</option>
+                  </select>
+                </label>
+                <label className="gm-setting-row">
+                  <span>
+                    <strong>Default depth</strong>
+                    <small>How many hops from the selected note.</small>
+                  </span>
+                  <input
+                    type="range"
+                    min={1}
+                    max={4}
+                    value={settings.graphView.defaultDepth}
+                    onChange={(event) => onChange({
+                      ...settings,
+                      graphView: {...settings.graphView, defaultDepth: Number(event.target.value)},
+                    })}
+                  />
+                  <b className="gm-setting-value">{settings.graphView.defaultDepth}</b>
+                </label>
+              </SettingsGroup>
+            )}
+          </section>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function SettingsGroup({title, children}: {title: string; children: ReactNode}) {
+  return (
+    <div className="gm-settings-group">
+      <h3>{title}</h3>
+      <div className="gm-settings-fields">{children}</div>
     </div>
   );
 }
@@ -2423,6 +2652,31 @@ function todayISO(): string {
   return local.toISOString().slice(0, 10);
 }
 
+function normalizeSettings(value: GoMentalSettings): GoMentalSettings {
+  const theme = value?.appearance?.theme === 'light' || value?.appearance?.theme === 'dark'
+    ? value.appearance.theme
+    : DEFAULT_SETTINGS.appearance.theme;
+  const defaultEditMode = value?.noteView?.defaultEditMode === 'source' || value?.noteView?.defaultEditMode === 'rich'
+    ? value.noteView.defaultEditMode
+    : DEFAULT_SETTINGS.noteView.defaultEditMode;
+  const defaultMode = value?.graphView?.defaultMode === '3d' || value?.graphView?.defaultMode === '2d'
+    ? value.graphView.defaultMode
+    : DEFAULT_SETTINGS.graphView.defaultMode;
+  const defaultDepth = clamp(Number(value?.graphView?.defaultDepth) || DEFAULT_SETTINGS.graphView.defaultDepth, 1, 4);
+  return {
+    version: 1,
+    appearance: {theme},
+    noteView: {
+      defaultEditMode,
+      showFindBar: typeof value?.noteView?.showFindBar === 'boolean' ? value.noteView.showFindBar : DEFAULT_SETTINGS.noteView.showFindBar,
+    },
+    graphView: {
+      defaultMode,
+      defaultDepth,
+    },
+  };
+}
+
 // Left-pane sizing: the grid's base sidebar column is 290px; the pane is
 // resizable within 50%–200% of that and the preference is persisted.
 const SIDEBAR_BASE_WIDTH = 290;
@@ -2471,13 +2725,6 @@ function readStoredTheme(): ThemeMode {
     // Ignore storage failures.
   }
   return window.matchMedia?.('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
-}
-
-function readUIStateTheme(value: unknown): ThemeMode {
-  if (value === 'dark' || value === 'light') {
-    return value;
-  }
-  return readStoredTheme();
 }
 
 function isConflictError(err: unknown): boolean {

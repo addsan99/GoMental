@@ -326,6 +326,38 @@ func TestServiceSaveDeleteRecentAndUIState(t *testing.T) {
 	}
 }
 
+func TestServiceSettingsAreAppLevel(t *testing.T) {
+	service := testService(t, nil)
+	ctx := context.Background()
+
+	settings, err := service.LoadSettings(ctx)
+	if err != nil {
+		t.Fatalf("load default settings: %v", err)
+	}
+	if settings.Appearance.Theme != "dark" || settings.NoteView.DefaultEditMode != "rich" || settings.GraphView.DefaultDepth != 2 {
+		t.Fatalf("unexpected default settings: %#v", settings)
+	}
+
+	settings.Appearance.Theme = "light"
+	settings.NoteView.DefaultEditMode = "source"
+	settings.NoteView.ShowFindBar = false
+	settings.GraphView.DefaultMode = "3d"
+	settings.GraphView.DefaultDepth = 4
+	if err := service.SaveSettings(ctx, settings); err != nil {
+		t.Fatalf("save settings: %v", err)
+	}
+	loaded, err := service.LoadSettings(ctx)
+	if err != nil {
+		t.Fatalf("load saved settings: %v", err)
+	}
+	if loaded.Appearance.Theme != "light" || loaded.NoteView.DefaultEditMode != "source" || loaded.NoteView.ShowFindBar || loaded.GraphView.DefaultMode != "3d" || loaded.GraphView.DefaultDepth != 4 {
+		t.Fatalf("unexpected saved settings: %#v", loaded)
+	}
+	if filepath.Base(service.settingsPath) != "GoMental.Settings.json" {
+		t.Fatalf("unexpected settings path: %s", service.settingsPath)
+	}
+}
+
 func TestServiceImportsRecipeURL(t *testing.T) {
 	root := t.TempDir()
 	writeNote(t, root, "alpha.md", "---\ntype: concept\ntitle: Alpha\n---\n")

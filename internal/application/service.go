@@ -279,16 +279,38 @@ type RecentWorkspaceDTO struct {
 
 type UIState map[string]any
 
+type Settings struct {
+	Version    int                `json:"version"`
+	Appearance AppearanceSettings `json:"appearance"`
+	NoteView   NoteViewSettings   `json:"noteView"`
+	GraphView  GraphViewSettings  `json:"graphView"`
+}
+
+type AppearanceSettings struct {
+	Theme string `json:"theme"`
+}
+
+type NoteViewSettings struct {
+	DefaultEditMode string `json:"defaultEditMode"`
+	ShowFindBar     bool   `json:"showFindBar"`
+}
+
+type GraphViewSettings struct {
+	DefaultMode  string `json:"defaultMode"`
+	DefaultDepth int    `json:"defaultDepth"`
+}
+
 type Service struct {
-	mu          sync.Mutex
-	events      EventSink
-	recentStore workspace.RecentWorkspaceStore
-	statePath   string
-	workspace   workspace.Workspace
-	repo        *workspace.FileNoteRepository
-	searchIndex *search.BleveIndex
-	graphStore  *graph.SQLiteStore
-	corpus      *liveCorpus
+	mu           sync.Mutex
+	events       EventSink
+	recentStore  workspace.RecentWorkspaceStore
+	statePath    string
+	settingsPath string
+	workspace    workspace.Workspace
+	repo         *workspace.FileNoteRepository
+	searchIndex  *search.BleveIndex
+	graphStore   *graph.SQLiteStore
+	corpus       *liveCorpus
 	// listFromSQLite is set at open time when the SQLite note-metadata projection is
 	// complete (one listable row per note). When false (e.g. a just-upgraded DB whose
 	// meta columns are still empty), ListNotes falls back to the filesystem so it is
@@ -323,7 +345,12 @@ func NewService(events EventSink) (*Service, error) {
 }
 
 func NewServiceWithStores(events EventSink, recentStore workspace.RecentWorkspaceStore, statePath string) *Service {
-	return &Service{events: events, recentStore: recentStore, statePath: statePath}
+	return &Service{
+		events:       events,
+		recentStore:  recentStore,
+		statePath:    statePath,
+		settingsPath: filepath.Join(filepath.Dir(statePath), "GoMental.Settings.json"),
+	}
 }
 
 func (s *Service) Close() error {
@@ -1208,6 +1235,42 @@ func (s *Service) RecentWorkspaces(ctx context.Context) ([]RecentWorkspaceDTO, e
 	return out, nil
 }
 
+func (s *Service) LoadSettings(ctx context.Context) (Settings, error) {
+	if err := ctx.Err(); err != nil {
+		return defaultSettings(), err
+	}
+	settings := defaultSettings()
+	data, err := os.ReadFile(s.settingsPath)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return settings, nil
+		}
+		return defaultSettings(), appErr("settings.read_failed", "Could not read settings", err)
+	}
+	if err := jsonUnmarshal(data, &settings); err != nil {
+		return defaultSettings(), appErr("settings.decode_failed", "Could not decode settings", err)
+	}
+	return normalizeSettings(settings), nil
+}
+
+func (s *Service) SaveSettings(ctx context.Context, settings Settings) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	settings = normalizeSettings(settings)
+	if err := os.MkdirAll(filepath.Dir(s.settingsPath), 0o755); err != nil {
+		return appErr("settings.write_failed", "Could not create settings directory", err)
+	}
+	data, err := jsonMarshalIndent(settings)
+	if err != nil {
+		return appErr("settings.encode_failed", "Could not encode settings", err)
+	}
+	if err := os.WriteFile(s.settingsPath, append(data, '\n'), 0o644); err != nil {
+		return appErr("settings.write_failed", "Could not write settings", err)
+	}
+	return nil
+}
+
 func (s *Service) LoadUIState(ctx context.Context) (UIState, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -1590,6 +1653,46 @@ func ensurePathInside(root string, path string) error {
 
 func graphLayoutPath(root string) string {
 	return filepath.Join(root, ".workspace", "layout", "graph-layout.json")
+}
+
+func defaultSettings() Settings {
+	return Settings{
+		Version: 1,
+		Appearance: AppearanceSettings{
+			Theme: "dark",
+		},
+		NoteView: NoteViewSettings{
+			DefaultEditMode: "rich",
+			ShowFindBar:     true,
+		},
+		GraphView: GraphViewSettings{
+			DefaultMode:  "2d",
+			DefaultDepth: 2,
+		},
+	}
+}
+
+func normalizeSettings(settings Settings) Settings {
+	defaults := defaultSettings()
+	if settings.Version <= 0 {
+		settings.Version = defaults.Version
+	}
+	if settings.Appearance.Theme != "light" && settings.Appearance.Theme != "dark" {
+		settings.Appearance.Theme = defaults.Appearance.Theme
+	}
+	if settings.NoteView.DefaultEditMode != "source" && settings.NoteView.DefaultEditMode != "rich" {
+		settings.NoteView.DefaultEditMode = defaults.NoteView.DefaultEditMode
+	}
+	if settings.GraphView.DefaultMode != "3d" && settings.GraphView.DefaultMode != "2d" {
+		settings.GraphView.DefaultMode = defaults.GraphView.DefaultMode
+	}
+	if settings.GraphView.DefaultDepth < 1 {
+		settings.GraphView.DefaultDepth = defaults.GraphView.DefaultDepth
+	}
+	if settings.GraphView.DefaultDepth > 4 {
+		settings.GraphView.DefaultDepth = 4
+	}
+	return settings
 }
 func (s *Service) repairWorkspaceProjections(ctx context.Context, root string, reason string, cause error) error {
 	if reason == "" {

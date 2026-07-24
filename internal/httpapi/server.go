@@ -164,6 +164,8 @@ func (s *Server) buildHandler() http.Handler {
 	mux.HandleFunc("POST /api/rebuild", s.gate(auth.RoleAdmin, s.handleRebuild))
 	mux.HandleFunc("GET /api/ui-state", s.gate(auth.RoleViewer, s.handleLoadUIState))
 	mux.HandleFunc("PUT /api/ui-state", s.gate(auth.RoleViewer, s.handleSaveUIState))
+	mux.HandleFunc("GET /api/settings", s.gate(auth.RoleViewer, s.handleLoadSettings))
+	mux.HandleFunc("PUT /api/settings", s.gate(auth.RoleViewer, s.handleSaveSettings))
 	s.registerGitRoutes(mux)
 	mux.HandleFunc("GET /api/events", s.handleEvents)
 	mux.HandleFunc("GET /api/healthz", s.handleHealth)

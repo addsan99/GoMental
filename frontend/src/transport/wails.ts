@@ -25,7 +25,7 @@ import {
   SelectWorkspaceDirectory,
 } from '../../wailsjs/go/main/App'
 import {EventsOn} from '../../wailsjs/runtime/runtime'
-import type {GitSyncResult, MoveNoteRequest, NoteDTOWithVersion, SaveNoteRequestWithVersion} from './types'
+import type {GitSyncResult, GoMentalSettings, MoveNoteRequest, NoteDTOWithVersion, SaveNoteRequestWithVersion} from './types'
 
 export {
   Backlinks,
@@ -74,6 +74,22 @@ export function GitSync(): Promise<GitSyncResult> {
     return Promise.reject(new Error('git sync is not available (not in viewer git mode)'))
   }
   return app.GitSync()
+}
+
+export function LoadSettings(): Promise<GoMentalSettings> {
+  const app = (window as any)?.go?.main?.App
+  if (!app || typeof app.LoadSettings !== 'function') {
+    return Promise.reject(new Error('settings are not available in this build'))
+  }
+  return app.LoadSettings()
+}
+
+export function SaveSettings(settings: GoMentalSettings): Promise<void> {
+  const app = (window as any)?.go?.main?.App
+  if (!app || typeof app.SaveSettings !== 'function') {
+    return Promise.reject(new Error('settings are not available in this build'))
+  }
+  return app.SaveSettings(settings)
 }
 
 export function onEvent(name: string, cb: (...data: any[]) => void): () => void {
