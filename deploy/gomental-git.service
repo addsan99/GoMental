@@ -1,0 +1,54 @@
+# systemd unit for a headless GoMental server in git-viewer (read-only) mode.
+# The notes live in a git repository that is the source of truth; this server
+# tracks a ref, pulls it (webhook and/or poll), and serves the wiki read-only.
+# Content is authored in git (PRs/review), never through GoMental.
+#
+# Install: copy the `gomental` binary to /usr/local/bin, this file to
+# /etc/systemd/system/gomental-git.service, then:
+#   sudo systemctl daemon-reload && sudo systemctl enable --now gomental-git
+#
+# Configure via /etc/gomental/gomental-git.env or a JSON config file (see
+# docs/GIT_SYNC.md and docs/DEPLOYMENT.md). Run behind a TLS-terminating reverse
+# proxy, or set GOMENTAL_TLS_CERT/GOMENTAL_TLS_KEY to terminate TLS directly.
+#
+# Credentials for the remote are the ambient git setup of the `gomental` user:
+# a git credential helper, a tokenized https remote, or an SSH key/agent. The
+# workspace dir need NOT pre-exist — GoMental clones GOMENTAL_GIT_REMOTE into it.
+
+[Unit]
+Description=GoMental server (git-viewer, read-only wiki over a tracked git ref)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=gomental
+Group=gomental
+EnvironmentFile=-/etc/gomental/gomental-git.env
+Environment=GOMENTAL_WORKSPACE=/srv/wiki
+Environment=GOMENTAL_ADDR=:8080
+# --- git-viewer mode ---
+Environment=GOMENTAL_GIT_REMOTE=https://github.com/org/wiki.git
+Environment=GOMENTAL_GIT_REF=main
+Environment=GOMENTAL_GIT_POLL=2m
+# Webhook secret for push-driven sync (POST /api/git/sync). Prefer setting this
+# in the EnvironmentFile so the secret isn't in the unit:
+#   GOMENTAL_GIT_WEBHOOK_SECRET=change-me
+# --read-only defaults ON when --git-remote is set; GOMENTAL_READ_ONLY=true is
+# explicit here for clarity.
+Environment=GOMENTAL_READ_ONLY=true
+ExecStart=/usr/local/bin/gomental serve
+Restart=on-failure
+RestartSec=3
+
+# Hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/srv/wiki
+AmbientCapabilities=
+CapabilityBoundingSet=
+
+[Install]
+WantedBy=multi-user.target

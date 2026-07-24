@@ -1,0 +1,36 @@
+# systemd unit for a headless GoMental server.
+# Install: copy the `gomental` binary to /usr/local/bin, this file to
+# /etc/systemd/system/gomental.service, then:
+#   sudo systemctl daemon-reload && sudo systemctl enable --now gomental
+#
+# Configure via /etc/gomental/gomental.env or a JSON config file (see
+# docs/DEPLOYMENT.md). Run behind a TLS-terminating reverse proxy, or set
+# GOMENTAL_TLS_CERT/GOMENTAL_TLS_KEY to terminate TLS directly.
+
+[Unit]
+Description=GoMental server (OKF wiki, HTTP API + agent API)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=gomental
+Group=gomental
+EnvironmentFile=-/etc/gomental/gomental.env
+Environment=GOMENTAL_WORKSPACE=/var/lib/gomental/workspace
+Environment=GOMENTAL_ADDR=:8080
+ExecStart=/usr/local/bin/gomental serve
+Restart=on-failure
+RestartSec=3
+
+# Hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/var/lib/gomental
+AmbientCapabilities=
+CapabilityBoundingSet=
+
+[Install]
+WantedBy=multi-user.target

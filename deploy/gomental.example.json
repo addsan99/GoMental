@@ -1,0 +1,10 @@
+{
+  "addr": ":8080",
+  "workspace": "/var/lib/gomental/workspace",
+  "authMode": "trustall",
+  "tlsCertFile": "",
+  "tlsKeyFile": "",
+  "allowedOrigins": [],
+  "requestRate": 50,
+  "writeRate": 10
+}

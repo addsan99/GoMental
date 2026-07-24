@@ -1,0 +1,128 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "GoMental API",
+    "version": "1.0.0",
+    "description": "REST API over the GoMental OKF wiki. All bodies are JSON. Note IDs may contain '/'; encode each path segment. Optimistic concurrency uses the opaque `version` token (returned on read/save; sent back via `baseVersion` or the `If-Match` header). Authentication is trust-all by default on a LAN; API keys (Bearer) attribute agents and can enforce roles."
+  },
+  "servers": [{ "url": "/" }],
+  "components": {
+    "securitySchemes": {
+      "bearerApiKey": { "type": "http", "scheme": "bearer", "description": "API key issued via POST /api/keys" }
+    },
+    "schemas": {
+      "Note": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string" },
+          "path": { "type": "string" },
+          "content": { "type": "string" },
+          "modifiedAt": { "type": "string", "format": "date-time" },
+          "version": { "type": "string", "description": "opaque optimistic-concurrency token" }
+        }
+      },
+      "NoteSummary": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string" },
+          "title": { "type": "string" },
+          "path": { "type": "string" },
+          "tags": { "type": "array", "items": { "type": "string" } },
+          "modifiedAt": { "type": "string", "format": "date-time" }
+        }
+      },
+      "SearchQuery": {
+        "type": "object",
+        "properties": {
+          "text": { "type": "string" },
+          "tags": { "type": "array", "items": { "type": "string" } },
+          "pathPrefix": { "type": "string" },
+          "limit": { "type": "integer" }
+        }
+      },
+      "SearchResult": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string" },
+          "path": { "type": "string" },
+          "title": { "type": "string" },
+          "score": { "type": "number" },
+          "fragments": { "type": "array", "items": { "type": "string" } }
+        }
+      },
+      "Error": {
+        "type": "object",
+        "properties": {
+          "code": { "type": "string" },
+          "message": { "type": "string" },
+          "detail": { "type": "string" }
+        }
+      }
+    }
+  },
+  "security": [{}, { "bearerApiKey": [] }],
+  "paths": {
+    "/api/info": { "get": { "summary": "Server identity + mode", "responses": { "200": { "description": "OK" } } } },
+    "/api/openapi.json": { "get": { "summary": "This spec", "responses": { "200": { "description": "OK" } } } },
+    "/api/healthz": { "get": { "summary": "Health/readiness", "responses": { "200": { "description": "OK" } } } },
+    "/api/notes": {
+      "get": {
+        "summary": "List all notes",
+        "responses": { "200": { "description": "OK", "content": { "application/json": { "schema": { "type": "array", "items": { "$ref": "#/components/schemas/NoteSummary" } } } } } }
+      },
+      "post": {
+        "summary": "Create a note (agent-ergonomic)",
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "type": "object", "properties": { "id": { "type": "string" }, "content": { "type": "string" }, "mode": { "type": "string", "enum": ["create", "upsert", "unique"], "description": "create=fail if exists (default); upsert=write regardless; unique=auto-suffix id" } } } } } },
+        "responses": {
+          "201": { "description": "Created", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Note" } } } },
+          "409": { "description": "Note already exists (mode=create)", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } }
+        }
+      }
+    },
+    "/api/notes/{id}": {
+      "get": {
+        "summary": "Read a note (returns version)",
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }],
+        "responses": {
+          "200": { "description": "OK", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Note" } } } },
+          "404": { "description": "Not found" }
+        }
+      },
+      "put": {
+        "summary": "Save a note (optimistic concurrency)",
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "string" } },
+          { "name": "If-Match", "in": "header", "required": false, "schema": { "type": "string" }, "description": "quoted version token; * forces" }
+        ],
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "type": "object", "properties": { "content": { "type": "string" }, "baseVersion": { "type": "string" }, "force": { "type": "boolean" } } } } } },
+        "responses": {
+          "200": { "description": "Saved", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Note" } } } },
+          "412": { "description": "Version conflict; current version in ETag", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } }
+        }
+      },
+      "delete": {
+        "summary": "Delete a note",
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }],
+        "responses": { "200": { "description": "Deleted" } }
+      }
+    },
+    "/api/search": {
+      "post": {
+        "summary": "Full-text + tag/path search (primary RAG retrieval entry point)",
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/SearchQuery" } } } },
+        "responses": { "200": { "description": "Ranked results with highlighted fragments", "content": { "application/json": { "schema": { "type": "array", "items": { "$ref": "#/components/schemas/SearchResult" } } } } } }
+      }
+    },
+    "/api/graph": { "post": { "summary": "Full knowledge graph (filtered)", "responses": { "200": { "description": "OK" } } } },
+    "/api/backlinks/{id}": { "get": { "summary": "Backlinks to a note", "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }], "responses": { "200": { "description": "OK" } } } },
+    "/api/neighborhood/{id}": { "get": { "summary": "Local graph neighborhood", "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }, { "name": "depth", "in": "query", "schema": { "type": "integer" } }], "responses": { "200": { "description": "OK" } } } },
+    "/api/import": { "post": { "summary": "Import a URL into a note (SSRF-guarded, editor)", "responses": { "200": { "description": "OK" } } } },
+    "/api/rebuild": { "post": { "summary": "Rebuild derived projections (admin)", "responses": { "200": { "description": "OK" } } } },
+    "/api/events": { "get": { "summary": "Server-Sent Events stream of note/graph changes", "responses": { "200": { "description": "text/event-stream" } } } },
+    "/api/keys": {
+      "get": { "summary": "List API keys (admin)", "security": [{ "bearerApiKey": [] }], "responses": { "200": { "description": "OK" } } },
+      "post": { "summary": "Create an API key (admin); returns the token once", "security": [{ "bearerApiKey": [] }], "requestBody": { "content": { "application/json": { "schema": { "type": "object", "properties": { "name": { "type": "string" }, "role": { "type": "string", "enum": ["viewer", "editor", "admin"] } } } } } }, "responses": { "201": { "description": "Created" } } }
+    },
+    "/api/keys/{id}": { "delete": { "summary": "Revoke an API key (admin)", "security": [{ "bearerApiKey": [] }], "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }], "responses": { "200": { "description": "Revoked" } } } }
+  }
+}

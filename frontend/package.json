@@ -1,0 +1,44 @@
+{
+  "name": "gomental-frontend",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "typecheck": "tsc --noEmit",
+    "lint": "tsc --noEmit",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@codemirror/autocomplete": "^6.20.3",
+    "@codemirror/commands": "^6.10.4",
+    "@codemirror/lang-markdown": "^6.5.0",
+    "@codemirror/language": "^6.12.4",
+    "@codemirror/search": "^6.7.1",
+    "@codemirror/state": "^6.7.1",
+    "@codemirror/view": "^6.43.6",
+    "@fontsource-variable/newsreader": "^5.2.10",
+    "@lezer/highlight": "^1.2.3",
+    "@mdxeditor/editor": "^4.0.4",
+    "@wailsio/runtime": "latest",
+    "d3-force-3d": "^3.0.6",
+    "mermaid": "^11.16.0",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0",
+    "react-force-graph-3d": "^1.29.1",
+    "three": "^0.185.1",
+    "three-spritetext": "^1.10.0"
+  },
+  "devDependencies": {
+    "@types/react": "^19.1.0",
+    "@types/react-dom": "^19.1.0",
+    "@types/three": "^0.185.1",
+    "@vitejs/plugin-react": "^5.0.0",
+    "typescript": "^5.6.3",
+    "vite": "^7.0.0"
+  },
+  "allowScripts": {
+    "esbuild@0.28.1": true
+  }
+}

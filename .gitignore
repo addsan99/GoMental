@@ -1,0 +1,25 @@
+# Go
+/bin/
+*.exe
+*.test
+
+# Wails
+/build/bin/
+/build/darwin/
+/build/windows/
+
+# Frontend
+/frontend/node_modules/
+/frontend/dist/
+/frontend/wailsjs/
+
+# Local projections
+.workspace/
+
+# Local-only data
+aie.brains/
+.claude/
+.agents/
+.cache-go/
+.gocache/
+.tmp-go/

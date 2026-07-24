@@ -1,0 +1,781 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400;500;600;700&family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;0,6..72,600;1,6..72,400;1,6..72,500&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --font-ui:'Hanken Grotesk',system-ui,-apple-system,sans-serif;
+    --font-read:'Newsreader',Georgia,'Times New Roman',serif;
+    --font-mono:'JetBrains Mono',ui-monospace,SFMono-Regular,Menlo,monospace;
+    /* light */
+    --bg:#f6f4f0; --surface:#fffefb; --surface-2:#f0ede7; --surface-3:#e9e5dd;
+    --border:#e6e2d9; --border-strong:#d6d1c5;
+    --text:#26232b; --text-2:#6b6760; --text-3:#9c988e;
+    --accent:#5b53f5; --accent-hover:#4a41ea; --accent-press:#3d34d6;
+    --accent-text:#4b42db; --accent-soft:#ecebff; --accent-soft-2:#e2e0ff; --accent-soft-line:#d3d0ff;
+    --accent-on:#ffffff;
+    --mark:rgba(240,167,58,.32); --good:#2f9e6f; --good-soft:#e4f5ec;
+    --shadow-sm:0 1px 2px rgba(38,35,30,.05);
+    --shadow-md:0 6px 20px -6px rgba(38,35,30,.14),0 2px 6px rgba(38,35,30,.06);
+    --shadow-lg:0 24px 60px -16px rgba(30,27,40,.30),0 8px 20px rgba(30,27,40,.12);
+  }
+  [data-theme="dark"]{
+    --bg:#0e0e12; --surface:#16161c; --surface-2:#1e1e26; --surface-3:#26262f;
+    --border:#26262e; --border-strong:#34343f;
+    --text:#eceaf2; --text-2:#a3a0ad; --text-3:#6d6a78;
+    --accent:#8b83ff; --accent-hover:#9c95ff; --accent-press:#7a71f5;
+    --accent-text:#a9a2ff; --accent-soft:rgba(139,131,255,.16); --accent-soft-2:rgba(139,131,255,.24); --accent-soft-line:rgba(139,131,255,.4);
+    --accent-on:#0e0e12;
+    --mark:rgba(242,180,90,.28); --good:#4fd0a2; --good-soft:rgba(79,208,162,.14);
+    --shadow-sm:0 1px 2px rgba(0,0,0,.4);
+    --shadow-md:0 8px 24px -8px rgba(0,0,0,.6),0 2px 8px rgba(0,0,0,.4);
+    --shadow-lg:0 28px 70px -16px rgba(0,0,0,.7),0 10px 24px rgba(0,0,0,.5);
+  }
+  [data-accent="emerald"]{--accent:#0f9d6b;--accent-hover:#0c8c5f;--accent-press:#0a7a53;--accent-text:#0b8a5d;--accent-soft:#e2f5ec;--accent-soft-2:#d0efe0;--accent-soft-line:#bfe8d3;}
+  [data-accent="emerald"][data-theme="dark"]{--accent:#3ddba1;--accent-hover:#54e0ac;--accent-text:#4fe0aa;--accent-soft:rgba(61,219,161,.16);--accent-soft-2:rgba(61,219,161,.24);--accent-soft-line:rgba(61,219,161,.4);}
+  [data-accent="amber"]{--accent:#e0862a;--accent-hover:#cf7920;--accent-press:#b96a19;--accent-text:#b16a1a;--accent-soft:#fbeed9;--accent-soft-2:#f6e2c3;--accent-soft-line:#f0d5ac;}
+  [data-accent="amber"][data-theme="dark"]{--accent:#f2b45a;--accent-hover:#f5c073;--accent-text:#f2b45a;--accent-soft:rgba(242,180,90,.16);--accent-soft-2:rgba(242,180,90,.24);--accent-soft-line:rgba(242,180,90,.4);}
+  [data-accent="blue"]{--accent:#2a6ff5;--accent-hover:#1f61ea;--accent-press:#1a54d6;--accent-text:#2360d6;--accent-soft:#e5eeff;--accent-soft-2:#d4e3ff;--accent-soft-line:#c2d6ff;}
+  [data-accent="blue"][data-theme="dark"]{--accent:#5b95ff;--accent-hover:#74a6ff;--accent-text:#7aa8ff;--accent-soft:rgba(91,149,255,.16);--accent-soft-2:rgba(91,149,255,.24);--accent-soft-line:rgba(91,149,255,.4);}
+  [data-face="sans"]{--font-read:'Hanken Grotesk',system-ui,sans-serif;}
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%;background:var(--bg);-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
+  a{color:var(--accent-text);text-decoration:none}
+  a:hover{text-decoration:underline}
+  a.wikilink{border-bottom:1px solid var(--accent-soft-line);text-decoration:none;font-weight:500;padding-bottom:1px;transition:background .12s}
+  a.wikilink:hover{background:var(--accent-soft);text-decoration:none;border-bottom-color:var(--accent)}
+  @keyframes gm-spin{to{transform:rotate(360deg)}}
+  @keyframes gm-pop{from{opacity:0;transform:translateY(10px) scale(.99)}to{opacity:1;transform:none}}
+  @keyframes gm-fade{from{opacity:0}to{opacity:1}}
+  @keyframes gm-toast{from{opacity:0;transform:translate(-50%,12px)}to{opacity:1;transform:translate(-50%,0)}}
+  .scroll{scrollbar-width:thin;scrollbar-color:var(--border-strong) transparent}
+  .scroll::-webkit-scrollbar{width:11px;height:11px}
+  .scroll::-webkit-scrollbar-thumb{background:var(--border-strong);border-radius:9px;border:3px solid transparent;background-clip:content-box}
+  .scroll::-webkit-scrollbar-track{background:transparent}
+  ::selection{background:var(--accent-soft-2);color:var(--text)}
+</style>
+</helmet>
+<div ref="{{ rootRef }}" data-theme="{{ theme }}" data-accent="{{ accent }}" data-face="{{ face }}" style="height:100vh;display:grid;grid-template-rows:56px 1fr;background:var(--bg);color:var(--text);font-family:var(--font-ui);font-size:14px">
+
+  <!-- ============================ HEADER ============================ -->
+  <header style="display:flex;align-items:center;gap:14px;padding:0 16px;background:var(--surface);border-bottom:1px solid var(--border);z-index:20">
+    <div style="display:flex;align-items:center;gap:11px;min-width:0">
+      <svg width="30" height="30" viewBox="0 0 32 32" fill="none" style="flex:none">
+        <rect width="32" height="32" rx="9" fill="var(--accent)"></rect>
+        <circle cx="11" cy="12" r="3.1" fill="var(--accent-on)"></circle>
+        <circle cx="21" cy="12" r="3.1" fill="var(--accent-on)"></circle>
+        <circle cx="16" cy="22" r="3.1" fill="var(--accent-on)"></circle>
+        <path d="M12.6 13.7 15 19.4M19.4 13.7 17 19.4M13.1 12h5.8" stroke="var(--accent-on)" stroke-width="1.5" stroke-linecap="round"></path>
+      </svg>
+      <div style="display:flex;flex-direction:column;min-width:0;line-height:1.15">
+        <span style="font:700 15px/1.15 var(--font-ui);letter-spacing:-.3px;color:var(--text)">GoMental</span>
+        <span style="font:400 10.5px/1.2 var(--font-mono);color:var(--text-3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">F:\dev\Go\gomindy\recipes</span>
+      </div>
+    </div>
+
+    <button onClick="{{ openPalette }}" style="margin-left:6px;display:flex;align-items:center;gap:9px;height:36px;padding:0 10px 0 12px;background:var(--surface-2);border:1px solid var(--border);border-radius:9px;color:var(--text-3);cursor:pointer;font:400 13px/1 var(--font-ui);min-width:230px" style-hover="{{ hovSearch }}">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+      <span style="flex:1;text-align:left">Jump to anything…</span>
+      <kbd style="font:500 10.5px/1 var(--font-mono);color:var(--text-2);background:var(--surface);border:1px solid var(--border);border-radius:5px;padding:3px 6px">⌘K</kbd>
+    </button>
+
+    <div style="flex:1"></div>
+
+    <button onClick="{{ rebuild }}" style="display:flex;align-items:center;gap:7px;height:36px;padding:0 13px;background:var(--surface);border:1px solid var(--border-strong);border-radius:9px;color:var(--text);cursor:pointer;font:500 13px/1 var(--font-ui)" style-hover="{{ hovBtn }}">
+      <span style="{{ rebuildSpinStyle }}"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-3-6.7L21 8"></path><path d="M21 3v5h-5"></path></svg></span>
+      {{ rebuildLabel }}
+    </button>
+    <button onClick="{{ toggleTheme }}" title="Toggle theme" style="width:36px;height:36px;display:flex;align-items:center;justify-content:center;background:var(--surface);border:1px solid var(--border-strong);border-radius:9px;color:var(--text-2);cursor:pointer" style-hover="{{ hovBtn }}">
+      {{ themeIcon }}
+    </button>
+  </header>
+
+  <div style="display:grid;grid-template-columns:290px minmax(0,1fr) 300px;min-height:0">
+
+    <!-- ============================ SIDEBAR ============================ -->
+    <aside style="background:var(--surface);border-right:1px solid var(--border);display:flex;flex-direction:column;min-height:0">
+      <div style="padding:16px 14px 12px;display:flex;flex-direction:column;gap:12px">
+        <div style="display:flex;align-items:center;justify-content:space-between">
+          <div style="display:flex;align-items:baseline;gap:8px">
+            <span style="font:600 11px/1 var(--font-ui);letter-spacing:.09em;text-transform:uppercase;color:var(--text-3)">Notes</span>
+            <span style="font:500 12px/1 var(--font-mono);color:var(--text-3)">{{ noteCount }}</span>
+          </div>
+          <div style="display:flex;gap:6px">
+            <button onClick="{{ newNote }}" style="display:flex;align-items:center;gap:5px;height:30px;padding:0 11px 0 9px;background:var(--accent);border:none;border-radius:8px;color:var(--accent-on);cursor:pointer;font:600 12.5px/1 var(--font-ui)" style-hover="{{ hovPrimary }}">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>New
+            </button>
+            <button onClick="{{ importNote }}" title="Import Markdown" style="width:30px;height:30px;display:flex;align-items:center;justify-content:center;background:var(--surface);border:1px solid var(--border-strong);border-radius:8px;color:var(--text-2);cursor:pointer" style-hover="{{ hovBtn }}">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12"></path><path d="m7 10 5 5 5-5"></path><path d="M5 21h14"></path></svg>
+            </button>
+          </div>
+        </div>
+
+        <div style="position:relative">
+          <svg style="position:absolute;left:11px;top:50%;transform:translateY(-50%);color:var(--text-3);pointer-events:none" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+          <input ref="{{ searchRef }}" value="{{ query }}" onInput="{{ onSearch }}" placeholder="Search notes" style="width:100%;height:37px;padding:0 32px 0 34px;background:var(--surface-2);border:1px solid var(--border);border-radius:9px;font:400 13px/1 var(--font-ui);color:var(--text)" style-focus="{{ focusInput }}">
+          <sc-if value="{{ hasQuery }}" hint-placeholder-val="{{ false }}">
+            <button onClick="{{ clearSearch }}" style="position:absolute;right:6px;top:50%;transform:translateY(-50%);width:24px;height:24px;display:flex;align-items:center;justify-content:center;background:transparent;border:none;border-radius:6px;color:var(--text-3);cursor:pointer" style-hover="{{ hovIcon }}">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+            </button>
+          </sc-if>
+        </div>
+      </div>
+
+      <div class="scroll" style="flex:1;overflow-y:auto;padding:0 8px 16px;min-height:0">
+        <sc-if value="{{ hasQuery }}" hint-placeholder-val="{{ false }}">
+          <div style="padding:2px 8px 8px;font:500 11.5px/1 var(--font-ui);color:var(--text-3);letter-spacing:.02em">{{ resultLabel }}</div>
+          <sc-for list="{{ searchResults }}" as="r" hint-placeholder-count="3">
+            <div onClick="{{ r.onSelect }}" style="{{ r.wrapStyle }}" style-hover="{{ hovResult }}">
+              <div style="display:flex;align-items:baseline;gap:7px">
+                <span style="font:600 13px/1.3 var(--font-ui);color:var(--text);letter-spacing:-.1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ r.title }}</span>
+                <span style="font:400 10.5px/1 var(--font-mono);color:var(--text-3);white-space:nowrap;flex:none">{{ r.pathShort }}</span>
+              </div>
+              <div style="font:400 12px/1.5 var(--font-ui);color:var(--text-2);margin-top:3px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">{{ r.snippet }}</div>
+            </div>
+          </sc-for>
+          <sc-if value="{{ noResults }}" hint-placeholder-val="{{ false }}">
+            <div style="padding:28px 16px;text-align:center;font:400 13px/1.6 var(--font-ui);color:var(--text-3)">No notes match “{{ query }}”.</div>
+          </sc-if>
+        </sc-if>
+
+        <sc-if value="{{ showTree }}" hint-placeholder-val="{{ true }}">
+          <sc-for list="{{ treeRows }}" as="row" hint-placeholder-count="9">
+            <div onClick="{{ row.onClick }}" style="{{ row.rowStyle }}" style-hover="{{ row.hover }}">
+              <sc-if value="{{ row.isFolder }}" hint-placeholder-val="{{ false }}">
+                <span style="{{ row.chevronStyle }}"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"></path></svg></span>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="flex:none;color:var(--text-3)"><path d="M4 7a2 2 0 0 1 2-2h3.6l1.6 2H18a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2z"></path></svg>
+              </sc-if>
+              <sc-if value="{{ row.isFile }}" hint-placeholder-val="{{ true }}">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="flex:none;color:{{ row.iconColor }}"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><path d="M14 2v6h6"></path></svg>
+              </sc-if>
+              <span style="flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ row.label }}</span>
+              <sc-if value="{{ row.hasCount }}" hint-placeholder-val="{{ false }}">
+                <span style="font:500 10.5px/1 var(--font-mono);color:var(--text-3);flex:none">{{ row.count }}</span>
+              </sc-if>
+            </div>
+          </sc-for>
+        </sc-if>
+      </div>
+
+      <div style="border-top:1px solid var(--border);padding:10px 16px;display:flex;align-items:center;gap:8px">
+        <span style="width:7px;height:7px;border-radius:9999px;background:var(--good);flex:none;box-shadow:0 0 0 3px var(--good-soft)"></span>
+        <span style="font:400 12px/1 var(--font-ui);color:var(--text-2)">{{ indexStatus }}</span>
+      </div>
+    </aside>
+
+    <!-- ============================ MAIN ============================ -->
+    <main style="display:flex;flex-direction:column;min-height:0;background:var(--bg)">
+      <div style="padding:12px 32px 0;background:var(--surface);border-bottom:1px solid var(--border);z-index:5">
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:16px">
+          <div style="display:flex;align-items:center;gap:7px;font:400 12px/1 var(--font-ui);color:var(--text-3);min-width:0">
+            <span>GoMental</span>
+            <sc-if value="{{ hasFolder }}" hint-placeholder-val="{{ false }}">
+              <span style="color:var(--text-3)">/</span><span>{{ folderName }}</span>
+            </sc-if>
+            <span style="color:var(--text-3)">/</span>
+            <span style="color:var(--text-2);font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ fileNameShort }}</span>
+          </div>
+          <div style="display:flex;align-items:center;gap:8px;flex:none">
+            <button onClick="{{ toggleSource }}" style="{{ sourceBtnStyle }}" style-hover="{{ hovBtn }}">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m16 18 6-6-6-6"></path><path d="m8 6-6 6 6 6"></path></svg>{{ sourceLabel }}
+            </button>
+            <button onClick="{{ save }}" style="display:flex;align-items:center;gap:6px;height:32px;padding:0 14px;background:var(--accent);border:none;border-radius:9px;color:var(--accent-on);cursor:pointer;font:600 13px/1 var(--font-ui)" style-hover="{{ hovPrimary }}">
+              {{ saveIcon }}{{ saveLabel }}
+            </button>
+          </div>
+        </div>
+        <div style="display:flex;align-items:flex-end;justify-content:space-between;gap:16px;margin-top:11px">
+          <div style="display:flex;gap:4px">
+            <button onClick="{{ onTabNote }}" style="{{ tabNoteStyle }}">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><path d="M14 2v6h6"></path><line x1="8" y1="13" x2="16" y2="13"></line><line x1="8" y1="17" x2="13" y2="17"></line></svg>Note
+            </button>
+            <button onClick="{{ onTabGraph }}" style="{{ tabGraphStyle }}">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><circle cx="5" cy="6" r="2"></circle><circle cx="19" cy="6" r="2"></circle><circle cx="12" cy="18" r="2"></circle><path d="M6.6 7.5 10.6 16.4M17.4 7.5 13.4 16.4M7 6h10"></path></svg>Graph
+            </button>
+          </div>
+          <div style="display:flex;align-items:center;gap:16px;font:400 12px/1 var(--font-ui);color:var(--text-3);padding-bottom:9px">
+            <span style="display:flex;align-items:center;gap:5px"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"></circle><path d="M12 7.5v4.7l3 1.8"></path></svg>Edited {{ updated }}</span>
+            <span>{{ wordCount }} words · {{ readTime }}</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- NOTE: rendered -->
+      <sc-if value="{{ showRendered }}" hint-placeholder-val="{{ true }}">
+        <div ref="{{ scrollRef }}" class="scroll" style="flex:1;overflow-y:auto;min-height:0">
+          <article style="max-width:748px;margin:0 auto;padding:36px 40px 120px;animation:gm-fade .25s ease">
+            <div style="display:flex;flex-wrap:wrap;gap:7px;margin-bottom:16px">
+              <sc-for list="{{ tags }}" as="t" hint-placeholder-count="3">
+                <span style="font:500 11px/1 var(--font-ui);letter-spacing:.02em;color:var(--accent-text);background:var(--accent-soft);border:1px solid var(--accent-soft-line);padding:4px 9px;border-radius:9999px">#{{ t }}</span>
+              </sc-for>
+            </div>
+            <h1 style="font:600 42px/1.08 var(--font-read);letter-spacing:-.6px;color:var(--text);margin:0 0 12px">{{ noteTitle }}</h1>
+            <p style="font:400 19px/1.6 var(--font-read);color:var(--text-2);margin:0 0 28px;text-wrap:pretty">{{ noteSummary }}</p>
+
+            <sc-for list="{{ blocks }}" as="b" hint-placeholder-count="4">
+              <sc-if value="{{ b.isH2 }}" hint-placeholder-val="{{ false }}">
+                <h2 data-anchor="{{ b.anchor }}" style="font:600 27px/1.2 var(--font-read);letter-spacing:-.3px;color:var(--text);margin:40px 0 14px;scroll-margin-top:24px">{{ b.text }}</h2>
+              </sc-if>
+              <sc-if value="{{ b.isP }}" hint-placeholder-val="{{ false }}">
+                <p style="font:400 17px/1.72 var(--font-read);color:var(--text);margin:0 0 18px;text-wrap:pretty">{{ b.rich }}</p>
+              </sc-if>
+              <sc-if value="{{ b.isTable }}" hint-placeholder-val="{{ false }}">
+                <div style="border:1px solid var(--border);border-radius:12px;overflow:hidden;margin:8px 0 24px;background:var(--surface);box-shadow:var(--shadow-sm)">
+                  <table style="width:100%;border-collapse:collapse">
+                    <thead>
+                      <tr style="background:var(--surface-2)">
+                        <sc-for list="{{ b.head }}" as="h" hint-placeholder-count="2">
+                          <th style="{{ h.thStyle }}">{{ h.text }}</th>
+                        </sc-for>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <sc-for list="{{ b.rows }}" as="row" hint-placeholder-count="6">
+                        <tr style="border-top:1px solid var(--border)">
+                          <sc-for list="{{ row.cells }}" as="c" hint-placeholder-count="2">
+                            <td style="{{ c.tdStyle }}">{{ c.rich }}</td>
+                          </sc-for>
+                        </tr>
+                      </sc-for>
+                    </tbody>
+                  </table>
+                </div>
+              </sc-if>
+              <sc-if value="{{ b.isSteps }}" hint-placeholder-val="{{ false }}">
+                <div style="display:flex;flex-direction:column;gap:14px;margin:6px 0 24px">
+                  <sc-for list="{{ b.items }}" as="s" hint-placeholder-count="4">
+                    <div style="display:flex;gap:14px">
+                      <span style="flex:none;width:26px;height:26px;border-radius:9999px;background:var(--accent-soft);color:var(--accent-text);font:600 13px/1 var(--font-ui);display:flex;align-items:center;justify-content:center;margin-top:2px">{{ s.num }}</span>
+                      <div style="flex:1;padding-top:2px">
+                        <div style="font:400 17px/1.62 var(--font-read);color:var(--text);text-wrap:pretty">{{ s.rich }}</div>
+                        <sc-if value="{{ s.hasSubs }}" hint-placeholder-val="{{ false }}">
+                          <div style="display:flex;flex-direction:column;gap:6px;margin-top:8px">
+                            <sc-for list="{{ s.subs }}" as="ss" hint-placeholder-count="2">
+                              <div style="display:flex;gap:9px;align-items:baseline"><span style="width:5px;height:5px;border-radius:9999px;background:var(--text-3);flex:none;transform:translateY(-3px)"></span><span style="font:400 16px/1.55 var(--font-read);color:var(--text-2)">{{ ss.rich }}</span></div>
+                            </sc-for>
+                          </div>
+                        </sc-if>
+                      </div>
+                    </div>
+                  </sc-for>
+                </div>
+              </sc-if>
+              <sc-if value="{{ b.isList }}" hint-placeholder-val="{{ false }}">
+                <div style="display:flex;flex-direction:column;gap:8px;margin:6px 0 24px">
+                  <sc-for list="{{ b.items }}" as="li" hint-placeholder-count="3">
+                    <div style="display:flex;gap:11px;align-items:baseline"><span style="width:6px;height:6px;border-radius:9999px;background:var(--accent);flex:none;transform:translateY(-3px)"></span><span style="font:400 17px/1.6 var(--font-read);color:var(--text)">{{ li.rich }}</span></div>
+                  </sc-for>
+                </div>
+              </sc-if>
+              <sc-if value="{{ b.isCallout }}" hint-placeholder-val="{{ false }}">
+                <div style="display:flex;gap:12px;padding:14px 16px;margin:8px 0 24px;background:var(--accent-soft);border:1px solid var(--accent-soft-line);border-radius:12px">
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--accent-text)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex:none;margin-top:2px"><path d="M9 18h6M10 21h4M12 2a7 7 0 0 0-4 12.7c.6.5 1 1.3 1 2.1V17h6v-.2c0-.8.4-1.6 1-2.1A7 7 0 0 0 12 2z"></path></svg>
+                  <div><div style="font:600 13px/1 var(--font-ui);color:var(--accent-text);letter-spacing:.02em;margin-bottom:5px;text-transform:uppercase">{{ b.title }}</div><div style="font:400 16px/1.6 var(--font-read);color:var(--text)">{{ b.rich }}</div></div>
+                </div>
+              </sc-if>
+            </sc-for>
+          </article>
+        </div>
+      </sc-if>
+
+      <!-- NOTE: source -->
+      <sc-if value="{{ showSource }}" hint-placeholder-val="{{ false }}">
+        <div class="scroll" style="flex:1;overflow-y:auto;min-height:0;background:var(--bg)">
+          <div style="max-width:840px;margin:0 auto;padding:28px 32px 96px">
+            <div style="border:1px solid var(--border);border-radius:12px;overflow:hidden;background:var(--surface);box-shadow:var(--shadow-sm)">
+              <div style="display:flex;align-items:center;gap:8px;padding:9px 14px;background:var(--surface-2);border-bottom:1px solid var(--border);font:500 12px/1 var(--font-mono);color:var(--text-3)">
+                <span style="width:9px;height:9px;border-radius:9999px;background:#e0665a"></span>
+                <span style="width:9px;height:9px;border-radius:9999px;background:#e2b04a"></span>
+                <span style="width:9px;height:9px;border-radius:9999px;background:#5bb56a"></span>
+                <span style="margin-left:6px">{{ fileNameShort }}.md</span>
+              </div>
+              <textarea value="{{ rawText }}" onInput="{{ onRawInput }}" spellcheck="false" style="width:100%;min-height:60vh;border:none;resize:vertical;padding:18px 20px;background:transparent;color:var(--text);font:400 13.5px/1.75 var(--font-mono);white-space:pre" style-focus="{{ focusPlain }}"></textarea>
+            </div>
+          </div>
+        </div>
+      </sc-if>
+
+      <!-- GRAPH -->
+      <sc-if value="{{ showGraph }}" hint-placeholder-val="{{ false }}">
+        <div style="flex:1;min-height:0;position:relative;background:var(--bg);background-image:radial-gradient(var(--border-strong) 1px,transparent 1px);background-size:26px 26px;animation:gm-fade .25s ease">
+          <div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;padding:24px">
+            <svg viewBox="0 0 900 560" preserveAspectRatio="xMidYMid meet" style="width:100%;height:100%;max-width:1000px">
+              <sc-for list="{{ graphEdges }}" as="e" hint-placeholder-count="4">
+                <line x1="{{ e.x1 }}" y1="{{ e.y1 }}" x2="{{ e.x2 }}" y2="{{ e.y2 }}" stroke="{{ e.stroke }}" stroke-width="{{ e.width }}"></line>
+              </sc-for>
+              <sc-for list="{{ graphNodes }}" as="n" hint-placeholder-count="6">
+                <g onClick="{{ n.onClick }}" style="cursor:pointer">
+                  <circle cx="{{ n.x }}" cy="{{ n.y }}" r="{{ n.rOuter }}" fill="{{ n.halo }}"></circle>
+                  <circle cx="{{ n.x }}" cy="{{ n.y }}" r="{{ n.r }}" fill="{{ n.fill }}" stroke="{{ n.stroke }}" stroke-width="{{ n.sw }}"></circle>
+                  <text x="{{ n.x }}" y="{{ n.labelY }}" text-anchor="middle" fill="{{ n.textColor }}" style="{{ n.labelStyle }}">{{ n.label }}</text>
+                </g>
+              </sc-for>
+            </svg>
+          </div>
+        </div>
+      </sc-if>
+    </main>
+
+    <!-- ============================ RIGHT RAIL ============================ -->
+    <aside class="scroll" style="background:var(--surface);border-left:1px solid var(--border);overflow-y:auto;min-height:0;padding:20px 18px 32px">
+      <sc-if value="{{ showNoteRail }}" hint-placeholder-val="{{ true }}">
+        <div style="margin-bottom:26px">
+          <div style="font:600 11px/1 var(--font-ui);letter-spacing:.09em;text-transform:uppercase;color:var(--text-3);margin-bottom:12px">On this page</div>
+          <sc-if value="{{ hasOutline }}" hint-placeholder-val="{{ true }}">
+            <div style="display:flex;flex-direction:column;gap:1px;position:relative">
+              <sc-for list="{{ outline }}" as="o" hint-placeholder-count="3">
+                <a onClick="{{ o.onClick }}" style="{{ o.style }}" style-hover="{{ o.hover }}">{{ o.text }}</a>
+              </sc-for>
+            </div>
+          </sc-if>
+          <sc-if value="{{ noOutline }}" hint-placeholder-val="{{ false }}">
+            <div style="font:400 13px/1.5 var(--font-ui);color:var(--text-3)">No sections yet.</div>
+          </sc-if>
+        </div>
+
+        <div style="margin-bottom:26px">
+          <div style="font:600 11px/1 var(--font-ui);letter-spacing:.09em;text-transform:uppercase;color:var(--text-3);margin-bottom:12px">Details</div>
+          <div style="display:flex;flex-direction:column;gap:9px">
+            <sc-for list="{{ details }}" as="d" hint-placeholder-count="5">
+              <div style="display:flex;align-items:baseline;justify-content:space-between;gap:12px">
+                <span style="font:400 12.5px/1.3 var(--font-ui);color:var(--text-3);flex:none">{{ d.label }}</span>
+                <span style="font:500 12.5px/1.3 var(--font-mono);color:var(--text-2);text-align:right;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ d.value }}</span>
+              </div>
+            </sc-for>
+          </div>
+        </div>
+
+        <div style="margin-bottom:26px">
+          <div style="display:flex;align-items:center;gap:7px;margin-bottom:12px">
+            <span style="font:600 11px/1 var(--font-ui);letter-spacing:.09em;text-transform:uppercase;color:var(--text-3)">Linked notes</span>
+            <span style="font:500 10.5px/1 var(--font-mono);color:var(--text-3);background:var(--surface-2);border-radius:9999px;padding:2px 7px">{{ linkedCount }}</span>
+          </div>
+          <sc-if value="{{ hasLinked }}" hint-placeholder-val="{{ false }}">
+            <div style="display:flex;flex-direction:column;gap:4px">
+              <sc-for list="{{ linkedNotes }}" as="l" hint-placeholder-count="2">
+                <div onClick="{{ l.onClick }}" style="display:flex;align-items:center;gap:8px;padding:7px 9px;border-radius:8px;cursor:pointer;color:var(--text)" style-hover="{{ hovResult }}">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--accent-text)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex:none"><path d="M9 15 15 9"></path><path d="M11 6.5 12.9 4.6a4 4 0 0 1 5.7 5.7l-2 1.9"></path><path d="M13 17.5l-1.9 1.9a4 4 0 0 1-5.7-5.7l2-1.9"></path></svg>
+                  <span style="font:500 13px/1.3 var(--font-ui);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ l.title }}</span>
+                </div>
+              </sc-for>
+            </div>
+          </sc-if>
+          <sc-if value="{{ noLinked }}" hint-placeholder-val="{{ true }}">
+            <div style="font:400 13px/1.5 var(--font-ui);color:var(--text-3)">No outgoing links.</div>
+          </sc-if>
+        </div>
+
+        <div>
+          <div style="display:flex;align-items:center;gap:7px;margin-bottom:12px">
+            <span style="font:600 11px/1 var(--font-ui);letter-spacing:.09em;text-transform:uppercase;color:var(--text-3)">Backlinks</span>
+            <span style="font:500 10.5px/1 var(--font-mono);color:var(--text-3);background:var(--surface-2);border-radius:9999px;padding:2px 7px">{{ backlinkCount }}</span>
+          </div>
+          <sc-if value="{{ hasBacklinks }}" hint-placeholder-val="{{ false }}">
+            <div style="display:flex;flex-direction:column;gap:6px">
+              <sc-for list="{{ backlinks }}" as="bl" hint-placeholder-count="2">
+                <div onClick="{{ bl.onClick }}" style="padding:9px 11px;border:1px solid var(--border);border-radius:10px;cursor:pointer;background:var(--surface)" style-hover="{{ hovCard }}">
+                  <div style="font:600 13px/1.3 var(--font-ui);color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ bl.title }}</div>
+                  <div style="font:400 12px/1.5 var(--font-ui);color:var(--text-2);margin-top:3px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">{{ bl.context }}</div>
+                </div>
+              </sc-for>
+            </div>
+          </sc-if>
+          <sc-if value="{{ noBacklinks }}" hint-placeholder-val="{{ true }}">
+            <div style="display:flex;flex-direction:column;align-items:center;gap:8px;padding:20px 12px;text-align:center;border:1px dashed var(--border-strong);border-radius:12px">
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--text-3)" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M9 15 15 9"></path><path d="M11 6.5 12.9 4.6a4 4 0 0 1 5.7 5.7l-2 1.9"></path><path d="M13 17.5l-1.9 1.9a4 4 0 0 1-5.7-5.7l2-1.9"></path></svg>
+              <span style="font:400 12.5px/1.5 var(--font-ui);color:var(--text-3)">No other note links here yet.</span>
+            </div>
+          </sc-if>
+        </div>
+      </sc-if>
+
+      <sc-if value="{{ showGraphRail }}" hint-placeholder-val="{{ false }}">
+        <div style="font:600 11px/1 var(--font-ui);letter-spacing:.09em;text-transform:uppercase;color:var(--text-3);margin-bottom:14px">Graph</div>
+        <p style="font:400 13px/1.6 var(--font-ui);color:var(--text-2);margin:0 0 20px">A map of how your notes connect. Click any node to open it.</p>
+        <div style="display:flex;flex-direction:column;gap:11px;margin-bottom:24px">
+          <div style="display:flex;align-items:center;gap:9px"><span style="width:13px;height:13px;border-radius:9999px;background:var(--accent);flex:none"></span><span style="font:400 13px/1 var(--font-ui);color:var(--text)">Current note</span></div>
+          <div style="display:flex;align-items:center;gap:9px"><span style="width:13px;height:13px;border-radius:9999px;background:var(--surface);border:2px solid var(--accent);flex:none"></span><span style="font:400 13px/1 var(--font-ui);color:var(--text)">Connected</span></div>
+          <div style="display:flex;align-items:center;gap:9px"><span style="width:13px;height:13px;border-radius:9999px;background:var(--surface);border:2px solid var(--border-strong);flex:none"></span><span style="font:400 13px/1 var(--font-ui);color:var(--text)">Other notes</span></div>
+        </div>
+        <div style="display:flex;gap:10px">
+          <div style="flex:1;border:1px solid var(--border);border-radius:12px;padding:13px 14px;background:var(--surface)"><div style="font:600 24px/1 var(--font-read);color:var(--text)">{{ noteCount }}</div><div style="font:400 12px/1 var(--font-ui);color:var(--text-3);margin-top:5px">Notes</div></div>
+          <div style="flex:1;border:1px solid var(--border);border-radius:12px;padding:13px 14px;background:var(--surface)"><div style="font:600 24px/1 var(--font-read);color:var(--text)">{{ edgeCount }}</div><div style="font:400 12px/1 var(--font-ui);color:var(--text-3);margin-top:5px">Links</div></div>
+        </div>
+      </sc-if>
+    </aside>
+  </div>
+
+  <!-- ============================ COMMAND PALETTE ============================ -->
+  <sc-if value="{{ paletteOpen }}" hint-placeholder-val="{{ false }}">
+    <div onClick="{{ closePalette }}" style="position:fixed;inset:0;z-index:50;background:rgba(20,18,28,.44);display:flex;align-items:flex-start;justify-content:center;padding-top:12vh;animation:gm-fade .12s ease">
+      <div onClick="{{ stop }}" style="width:min(600px,92vw);background:var(--surface);border:1px solid var(--border);border-radius:16px;box-shadow:var(--shadow-lg);overflow:hidden;animation:gm-pop .16s cubic-bezier(.2,.8,.2,1)">
+        <div style="display:flex;align-items:center;gap:11px;padding:14px 16px;border-bottom:1px solid var(--border)">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--text-3)" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+          <input ref="{{ paletteRef }}" value="{{ paletteQuery }}" onInput="{{ onPaletteInput }}" onKeyDown="{{ onPaletteKey }}" placeholder="Search notes, jump anywhere…" style="flex:1;border:none;background:transparent;color:var(--text);font:400 16px/1 var(--font-ui)" style-focus="{{ focusPlain }}">
+          <kbd style="font:500 10.5px/1 var(--font-mono);color:var(--text-3);background:var(--surface-2);border:1px solid var(--border);border-radius:5px;padding:4px 7px">ESC</kbd>
+        </div>
+        <div class="scroll" style="max-height:52vh;overflow-y:auto;padding:8px">
+          <sc-for list="{{ paletteResults }}" as="p" hint-placeholder-count="5">
+            <div onClick="{{ p.onSelect }}" onMouseEnter="{{ p.onHover }}" style="{{ p.style }}">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="flex:none;color:{{ p.iconColor }}"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><path d="M14 2v6h6"></path></svg>
+              <div style="flex:1;min-width:0">
+                <div style="font:600 14px/1.3 var(--font-ui);color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ p.title }}</div>
+                <div style="font:400 12px/1.3 var(--font-mono);color:var(--text-3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ p.path }}</div>
+              </div>
+              <sc-if value="{{ p.selected }}" hint-placeholder-val="{{ false }}">
+                <kbd style="font:500 10px/1 var(--font-mono);color:var(--text-3);background:var(--surface);border:1px solid var(--border);border-radius:5px;padding:3px 6px;flex:none">↵</kbd>
+              </sc-if>
+            </div>
+          </sc-for>
+          <sc-if value="{{ paletteEmpty }}" hint-placeholder-val="{{ false }}">
+            <div style="padding:28px;text-align:center;font:400 14px/1.5 var(--font-ui);color:var(--text-3)">Nothing found.</div>
+          </sc-if>
+        </div>
+        <div style="display:flex;align-items:center;gap:16px;padding:9px 16px;border-top:1px solid var(--border);font:400 11.5px/1 var(--font-ui);color:var(--text-3)">
+          <span style="display:flex;align-items:center;gap:5px"><kbd style="font:500 10px/1 var(--font-mono);background:var(--surface-2);border:1px solid var(--border);border-radius:4px;padding:2px 5px">↑↓</kbd>navigate</span>
+          <span style="display:flex;align-items:center;gap:5px"><kbd style="font:500 10px/1 var(--font-mono);background:var(--surface-2);border:1px solid var(--border);border-radius:4px;padding:2px 5px">↵</kbd>open</span>
+        </div>
+      </div>
+    </div>
+  </sc-if>
+
+  <!-- ============================ TOAST ============================ -->
+  <sc-if value="{{ toastShown }}" hint-placeholder-val="{{ false }}">
+    <div style="position:fixed;left:50%;bottom:28px;z-index:60;display:flex;align-items:center;gap:9px;padding:11px 16px;background:var(--text);color:var(--bg);border-radius:10px;box-shadow:var(--shadow-lg);font:500 13px/1 var(--font-ui);animation:gm-toast .2s ease">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="var(--good)" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"></path></svg>{{ toastMsg }}
+    </div>
+  </sc-if>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:1440,&quot;height&quot;:900},&quot;accent&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;iris&quot;,&quot;emerald&quot;,&quot;amber&quot;,&quot;blue&quot;],&quot;default&quot;:&quot;iris&quot;,&quot;tsType&quot;:&quot;string&quot;,&quot;section&quot;:&quot;Theme&quot;},&quot;readingFace&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;Serif&quot;,&quot;Sans&quot;],&quot;default&quot;:&quot;Serif&quot;,&quot;tsType&quot;:&quot;string&quot;,&quot;section&quot;:&quot;Theme&quot;}}">
+class Component extends DCLogic {
+  constructor(props){
+    super(props);
+    const slug = s => s.toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-+|-+$/g,'');
+    this.slug = slug;
+    const N = {
+      'grilled-mushrooms':{title:'Grilled Mushrooms',file:'grilled mushrooms',folder:null,updated:'a minute ago',tags:['mains','vegetarian','grill'],
+        summary:'Simple grilled mushrooms suitable for button, cremini, portobello, or king oyster mushrooms.',
+        blocks:[
+          {t:'h2',text:'Ingredients'},
+          {t:'table',head:['Ingredient','Amount'],rows:[['Mushrooms','500 g'],['Olive oil','3 tbsp'],['Garlic, minced','2 cloves'],['Soy sauce','1 tbsp'],['Balsamic vinegar (optional)','1 tsp'],['Fresh thyme or rosemary (or ½ tsp dried)','1 tsp'],['Kosher salt','½ tsp'],['Freshly ground black pepper','¼ tsp'],['Lemon juice','Juice of ½ lemon'],['Fresh parsley','To garnish']]},
+          {t:'h2',text:'Instructions'},
+          {t:'steps',items:[
+            {text:'Preheat the grill to **medium-high heat (≈220°C)**.'},
+            {text:'In a bowl, whisk together the olive oil, garlic, soy sauce, balsamic vinegar, herbs, salt, and pepper.'},
+            {text:'Toss the mushrooms in the marinade until evenly coated.'},
+            {text:'Marinate for **15–30 minutes**.'},
+            {text:'Grill:',subs:['Small mushrooms: **4–6 minutes per side**','Large portobellos: **5–7 minutes per side**']},
+            {text:'Finish with a squeeze of lemon and a scatter of parsley. Serve alongside [[mashed potatoes]].'}
+          ]},
+          {t:'callout',title:'Tip',text:"Don't crowd the grill — give each mushroom room so it sears instead of steaming."}
+        ]},
+      'mashed-potatoes':{title:'Mashed Potatoes',file:'mashed potatoes',folder:null,updated:'2 days ago',tags:['sides','comfort'],
+        summary:'Creamy, buttery mashed potatoes with a silky finish — the reliable partner to almost anything off the grill.',
+        blocks:[
+          {t:'h2',text:'Ingredients'},
+          {t:'table',head:['Ingredient','Amount'],rows:[['Yukon gold potatoes','1 kg'],['Butter','80 g'],['Whole milk, warm','120 ml'],['Sour cream','2 tbsp'],['Kosher salt','to taste'],['White pepper','a pinch']]},
+          {t:'h2',text:'Instructions'},
+          {t:'steps',items:[
+            {text:'Peel and quarter the potatoes, then cover with **cold salted water**.'},
+            {text:'Bring to a boil and simmer until fork-tender, about **18–20 minutes**.'},
+            {text:'Drain well and let steam off for a minute to dry.'},
+            {text:'Rice or mash, then fold in butter, warm milk, and sour cream until silky.'},
+            {text:'Season and serve warm.'}
+          ]},
+          {t:'callout',title:'Tip',text:'Warm your milk before adding it — cold liquid seizes the starch and turns the mash gluey.'}
+        ]},
+      'omlette-mushroom-onion':{title:'Mushroom & Onion Omelette',file:'omlette mushroom onion',folder:null,updated:'3 months ago',tags:['breakfast','eggs'],
+        summary:'A soft, folded omelette built on caramelised onion and browned mushrooms.',
+        blocks:[
+          {t:'h2',text:'Ingredients'},
+          {t:'table',head:['Ingredient','Amount'],rows:[['Eggs','3'],['Mushrooms, sliced','1 cup'],['Onion, finely chopped','2–3 tbsp'],['Butter','1 tbsp'],['Cheese, grated','30 g'],['Salt & pepper','to taste']]},
+          {t:'h2',text:'Instructions'},
+          {t:'steps',items:[
+            {text:'Sauté onion in butter until golden, then add mushrooms and brown well. Leftover [[grilled mushrooms]] work beautifully here.'},
+            {text:'Beat the eggs with a splash of water, salt, and pepper.'},
+            {text:'Pour into a hot buttered pan; drag the set edges inward as it cooks.'},
+            {text:'Add the filling and cheese to one half and **fold** while still slightly wet.'}
+          ]}
+        ]},
+      'ramen-soup-1':{title:'Ramen Soup #1',file:'ramen soup #1',folder:null,updated:'a year ago',tags:['soup','noodles'],
+        summary:'A quick weeknight shoyu-style ramen bowl with a soft egg and plenty of aromatics.',
+        blocks:[
+          {t:'h2',text:'Ingredients'},
+          {t:'table',head:['Ingredient','Amount'],rows:[['Chicken stock','1 L'],['Soy sauce','3 tbsp'],['Mirin','1 tbsp'],['Fresh ramen noodles','2 portions'],['Soft-boiled eggs','2'],['Scallions & nori','to garnish']]},
+          {t:'h2',text:'Instructions'},
+          {t:'steps',items:[
+            {text:'Simmer stock with soy sauce, mirin, ginger, and garlic for **15 minutes**.'},
+            {text:'Cook noodles separately, then divide between bowls.'},
+            {text:'Ladle the hot broth over and top with egg, scallions, and nori.'}
+          ]},
+          {t:'callout',title:'Tip',text:'Never cook noodles in the broth — the starch clouds it. Cook and drain, then combine.'}
+        ]},
+      'air-fryer-bang-bang-salmon':{title:'Air Fryer Bang Bang Salmon Bites',file:'air fryer bang bang salmon bites',folder:'recipes',updated:'18 hours ago',tags:['seafood','air-fryer','spicy'],
+        summary:'Crispy salmon cubes tossed in a sweet-and-spicy bang bang sauce — ready in about fifteen minutes.',
+        blocks:[
+          {t:'h2',text:'Ingredients'},
+          {t:'table',head:['Ingredient','Amount'],rows:[['Salmon fillet, cubed','500 g'],['Extra virgin olive oil','2 tbsp'],['Paprika','1 tsp'],['Garlic powder','1 tsp'],['Mayonnaise','⅓ cup'],['Sweet chili sauce','2 tbsp'],['Sriracha','1 tbsp']]},
+          {t:'h2',text:'Instructions'},
+          {t:'steps',items:[
+            {text:'Toss salmon with oil, paprika, garlic powder, salt, and pepper.'},
+            {text:'Air fry at **200°C for 8–10 minutes**, shaking halfway.'},
+            {text:'Whisk the mayo, sweet chili, and sriracha into a bang bang sauce.'},
+            {text:'Toss the hot bites in sauce, or drizzle to keep them crisp. See also [[glazed salmon]].'}
+          ]}
+        ]},
+      'glazed-salmon':{title:'Glazed Salmon',file:'glazed salmon',folder:'recipes',updated:'a day ago',tags:['seafood','weeknight'],
+        summary:'Pan-seared salmon finished in a glossy soy-honey glaze.',
+        blocks:[
+          {t:'h2',text:'Ingredients'},
+          {t:'table',head:['Ingredient','Amount'],rows:[['Salmon fillets','2'],['Soy sauce','3 tbsp'],['Honey','2 tbsp'],['Rice vinegar','1 tbsp'],['Garlic, grated','1 clove']]},
+          {t:'h2',text:'Instructions'},
+          {t:'steps',items:[
+            {text:'Sear salmon skin-side down until crisp, then flip.'},
+            {text:'Add the soy, honey, vinegar, and garlic; spoon the glaze over as it thickens.'},
+            {text:'Cook until just opaque and lacquered. For a spicier take, try [[air fryer bang bang salmon bites]].'}
+          ]}
+        ]},
+      'israeli-style-schnitzel':{title:'Israeli Style Schnitzel',file:'israeli style schnitzel',folder:'recipes',updated:'an hour ago',tags:['mains','chicken'],
+        summary:'Thin, crunchy chicken schnitzel seasoned the Israeli way — with turmeric and garlic in the flour.',
+        blocks:[
+          {t:'h2',text:'Ingredients'},
+          {t:'table',head:['Ingredient','Amount'],rows:[['Chicken breasts, pounded thin','4'],['Flour','½ cup'],['Turmeric','½ tsp'],['Garlic powder','¼ tsp'],['Eggs','2'],['Breadcrumbs','1½ cups'],['Oil, for frying','as needed']]},
+          {t:'h2',text:'Instructions'},
+          {t:'steps',items:[
+            {text:'Season the flour with **turmeric, garlic powder**, salt, and pepper.'},
+            {text:'Dredge each cutlet in flour, then egg, then breadcrumbs.'},
+            {text:'Shallow-fry until deep golden, about **2–3 minutes per side**.'},
+            {text:'Drain and serve with lemon wedges.'}
+          ]}
+        ]}
+    };
+    this.order = ['grilled-mushrooms','mashed-potatoes','omlette-mushroom-onion','ramen-soup-1','air-fryer-bang-bang-salmon','glazed-salmon','israeli-style-schnitzel'];
+    for (const id in N){ N[id].id=id; N[id].path = (N[id].folder? N[id].folder+'/' : '')+id+'.md'; N[id].links = this.extractLinks(N[id]); }
+    this.notes = N;
+    this.rootRef=React.createRef(); this.scrollRef=React.createRef(); this.searchRef=React.createRef(); this.paletteRef=React.createRef();
+    let theme='light';
+    try{ theme = localStorage.getItem('gm-theme')||'light'; }catch(e){}
+    this.state={ theme, query:'', activeId:'grilled-mushrooms', mode:'note', raw:false,
+      expanded:{recipes:true}, paletteOpen:false, paletteQuery:'', palSel:0,
+      rebuilding:false, toast:'', savedFlash:false, rawDrafts:{} };
+  }
+  extractLinks(note){
+    const set=new Set(); const re=/\[\[([^\]|]+)/g; let m;
+    const scan=s=>{ if(!s)return; while((m=re.exec(s))) set.add(this.slug(m[1])); };
+    scan(note.summary);
+    (note.blocks||[]).forEach(b=>{ scan(b.text); (b.items||[]).forEach(it=>{ scan(typeof it==='string'?it:it.text); (it.subs||[]).forEach(scan); }); });
+    return [...set];
+  }
+  componentDidMount(){
+    this.onKey=(e)=>{
+      if((e.metaKey||e.ctrlKey)&&e.key.toLowerCase()==='k'){ e.preventDefault(); this.setState(s=>({paletteOpen:!s.paletteOpen,paletteQuery:'',palSel:0}),()=>{ if(this.paletteRef.current) this.paletteRef.current.focus(); }); }
+      else if(e.key==='Escape' && this.state.paletteOpen){ this.setState({paletteOpen:false}); }
+    };
+    window.addEventListener('keydown',this.onKey);
+  }
+  componentWillUnmount(){ window.removeEventListener('keydown',this.onKey); clearTimeout(this._t); clearTimeout(this._rb); }
+  cur(){ return this.notes[this.state.activeId]; }
+  select(id){ if(!this.notes[id]) return; this.setState({activeId:id,mode:'note',raw:false,paletteOpen:false},()=>{ if(this.scrollRef.current) this.scrollRef.current.scrollTop=0; }); }
+  toast(msg){ this.setState({toast:msg}); clearTimeout(this._t); this._t=setTimeout(()=>this.setState({toast:''}),1900); }
+  countWords(note){ let n=0; const add=s=>{ if(s) n+=s.replace(/[*`\[\]|]/g,'').trim().split(/\s+/).filter(Boolean).length; }; add(note.summary); (note.blocks||[]).forEach(b=>{ add(b.text); (b.rows||[]).forEach(r=>r.forEach(add)); (b.items||[]).forEach(it=>{ add(typeof it==='string'?it:it.text); (it.subs||[]).forEach(add); }); }); return n; }
+  md(str){
+    if(str==null) return null;
+    const out=[]; let key=0,last=0,m;
+    const re=/\*\*(.+?)\*\*|`([^`]+?)`|\[\[([^\]|]+?)(?:\|([^\]]+?))?\]\]/g;
+    while((m=re.exec(str))){
+      if(m.index>last) out.push(str.slice(last,m.index));
+      if(m[1]!=null) out.push(React.createElement('strong',{key:key++,style:{fontWeight:600,color:'var(--text)'}},m[1]));
+      else if(m[2]!=null) out.push(React.createElement('code',{key:key++,style:{fontFamily:'var(--font-mono)',fontSize:'.82em',background:'var(--surface-2)',color:'var(--accent-text)',padding:'2px 5px',borderRadius:'5px',border:'1px solid var(--border)'}},m[2]));
+      else { const id=this.slug(m[3]); const label=m[4]||m[3]; out.push(React.createElement('a',{key:key++,className:'wikilink',onClick:(e)=>{e.preventDefault();this.select(id);}},label)); }
+      last=re.lastIndex;
+    }
+    if(last<str.length) out.push(str.slice(last));
+    return out;
+  }
+  toMarkdown(note){
+    const L=['---','title: '+note.title,'tags: ['+note.tags.join(', ')+']','---','','# '+note.title,'',note.summary,''];
+    (note.blocks||[]).forEach(b=>{
+      if(b.t==='h2') L.push('## '+b.text,'');
+      else if(b.t==='p') L.push(b.text,'');
+      else if(b.t==='table'){ L.push('| '+b.head.join(' | ')+' |'); L.push('| '+b.head.map(()=>'---').join(' | ')+' |'); b.rows.forEach(r=>L.push('| '+r.join(' | ')+' |')); L.push(''); }
+      else if(b.t==='steps'){ b.items.forEach((it,i)=>{ const it2=typeof it==='string'?{text:it}:it; L.push((i+1)+'. '+it2.text); (it2.subs||[]).forEach(s=>L.push('   - '+s)); }); L.push(''); }
+      else if(b.t==='list'){ b.items.forEach(it=>L.push('- '+(typeof it==='string'?it:it.text))); L.push(''); }
+      else if(b.t==='callout') L.push('> **'+b.title+'** '+b.text,'');
+    });
+    return L.join('\n');
+  }
+  toggleTheme(){ this.setState(s=>{ const theme=s.theme==='dark'?'light':'dark'; try{localStorage.setItem('gm-theme',theme);}catch(e){} return {theme}; }); }
+  onSearch(e){ this.setState({query:e.target.value}); }
+  clearSearch(){ this.setState({query:''}); if(this.searchRef.current) this.searchRef.current.focus(); }
+  search(q){
+    q=q.trim().toLowerCase(); if(!q) return [];
+    const res=[];
+    this.order.forEach(id=>{ const n=this.notes[id];
+      const hay=(n.title+' '+n.summary+' '+n.tags.join(' ')+' '+this.toMarkdown(n)).toLowerCase();
+      const idx=hay.indexOf(q); if(idx<0) return;
+      const body=(n.summary+' — '+this.toMarkdown(n).replace(/[#>*`|\-]/g,' ').replace(/\s+/g,' ')).trim();
+      const bi=body.toLowerCase().indexOf(q); let snip=body.slice(0,120);
+      if(bi>=0){ const st=Math.max(0,bi-30); snip=(st>0?'…':'')+body.slice(st,bi+q.length+70); }
+      res.push({note:n,snip}); });
+    return res;
+  }
+  hi(text,q){ q=q.trim(); if(!q) return text; const parts=[]; const low=text.toLowerCase(); const lq=q.toLowerCase(); let i=0,k=0,idx;
+    while((idx=low.indexOf(lq,i))>=0){ if(idx>i) parts.push(text.slice(i,idx)); parts.push(React.createElement('mark',{key:k++,style:{background:'var(--mark)',color:'var(--text)',borderRadius:'3px',padding:'0 1px'}},text.slice(idx,idx+q.length))); i=idx+q.length; }
+    parts.push(text.slice(i)); return parts; }
+  scrollTo(anchor){ const c=this.scrollRef.current; if(!c) return; const el=c.querySelector('[data-anchor="'+anchor+'"]'); if(el){ c.scrollTo({top:el.offsetTop-16,behavior:'smooth'}); } }
+
+  renderVals(){
+    const s=this.state, note=this.cur(), q=s.query;
+    const isDark=s.theme==='dark';
+    const tabBase='display:flex;align-items:center;gap:7px;height:34px;padding:0 13px;border:none;border-bottom:2px solid transparent;background:transparent;cursor:pointer;font:600 13.5px/1 var(--font-ui);border-radius:6px 6px 0 0;';
+    const tabOn=tabBase+'color:var(--accent-text);border-bottom-color:var(--accent);';
+    const tabOff=tabBase+'color:var(--text-3);';
+    const secBtn='display:flex;align-items:center;gap:7px;height:32px;padding:0 13px;border-radius:9px;cursor:pointer;font:500 13px/1 var(--font-ui);';
+
+    // tree
+    const treeRows=[]; const rootFiles=this.order.filter(id=>!this.notes[id].folder); const recipeFiles=this.order.filter(id=>this.notes[id].folder==='recipes');
+    const rowStyleFor=(depth,active,folder)=>`display:flex;align-items:center;gap:8px;height:33px;padding:0 9px 0 ${9+depth*15}px;border-radius:9px;cursor:pointer;font:${active?'600':'500'} 13.5px/1 var(--font-ui);color:${active?'var(--text)':(folder?'var(--text-2)':'var(--text-2)')};background:${active?'var(--accent-soft)':'transparent'};box-shadow:${active?'inset 2px 0 0 var(--accent)':'none'};`;
+    treeRows.push({key:'root',isFolder:true,isFile:false,label:'Root',hasCount:true,count:rootFiles.length+recipeFiles.length,rowStyle:rowStyleFor(0,false,true),chevronStyle:'display:flex;color:var(--text-3);transition:transform .15s;transform:rotate('+(s.expanded.root===false?'0':'90')+'deg)',hover:{background:'var(--surface-2)'},onClick:()=>this.setState(st=>({expanded:{...st.expanded,root:st.expanded.root===false?true:false}}))});
+    if(s.expanded.root!==false){
+      rootFiles.forEach(id=>{ const active=id===s.activeId&&s.mode==='note'; treeRows.push({key:id,isFolder:false,isFile:true,label:this.notes[id].file,hasCount:false,iconColor:active?'var(--accent-text)':'var(--text-3)',rowStyle:rowStyleFor(1,active,false),hover:active?{}:{background:'var(--surface-2)'},onClick:()=>this.select(id)}); });
+      const rOpen=s.expanded.recipes!==false;
+      treeRows.push({key:'recipes',isFolder:true,isFile:false,label:'recipes',hasCount:true,count:recipeFiles.length,rowStyle:rowStyleFor(1,false,true),chevronStyle:'display:flex;color:var(--text-3);transition:transform .15s;transform:rotate('+(rOpen?'90':'0')+'deg)',hover:{background:'var(--surface-2)'},onClick:()=>this.setState(st=>({expanded:{...st.expanded,recipes:!rOpen}}))});
+      if(rOpen) recipeFiles.forEach(id=>{ const active=id===s.activeId&&s.mode==='note'; treeRows.push({key:id,isFolder:false,isFile:true,label:this.notes[id].file,hasCount:false,iconColor:active?'var(--accent-text)':'var(--text-3)',rowStyle:rowStyleFor(2,active,false),hover:active?{}:{background:'var(--surface-2)'},onClick:()=>this.select(id)}); });
+    }
+
+    // search results
+    const rawRes=this.search(q);
+    const searchResults=rawRes.map(r=>({key:r.note.id,title:r.note.title,pathShort:(r.note.folder?r.note.folder+'/':'')+r.note.id,snippet:this.hi(r.snip,q),wrapStyle:'padding:9px 10px;border-radius:10px;cursor:pointer;margin-bottom:2px;'+(r.note.id===s.activeId?'background:var(--accent-soft);':''),onSelect:()=>this.select(r.note.id)}));
+
+    // blocks
+    const outline=[];
+    const blocks=(note.blocks||[]).map((b,i)=>{
+      const o={key:i,isH2:false,isP:false,isTable:false,isSteps:false,isList:false,isCallout:false};
+      if(b.t==='h2'){ const anchor=this.slug(b.text); o.isH2=true; o.text=b.text; o.anchor=anchor; outline.push({key:anchor,text:b.text,anchor}); }
+      else if(b.t==='p'){ o.isP=true; o.rich=this.md(b.text); }
+      else if(b.t==='table'){ o.isTable=true;
+        o.head=b.head.map((h,ci)=>({key:ci,text:h,thStyle:`padding:11px 16px;text-align:${ci===0?'left':'right'};font:600 12px/1 var(--font-ui);letter-spacing:.03em;text-transform:uppercase;color:var(--text-3);`}));
+        o.rows=b.rows.map((r,ri)=>({key:ri,cells:r.map((c,ci)=>({key:ci,rich:this.md(c),tdStyle:`padding:11px 16px;text-align:${ci===0?'left':'right'};font:${ci===0?'400':'500'} 15px/1.5 var(--font-read);color:${ci===0?'var(--text)':'var(--text-2)'};${ci>0?'font-variant-numeric:tabular-nums;white-space:nowrap;':''}`}))}));
+      }
+      else if(b.t==='steps'){ o.isSteps=true; o.items=b.items.map((it,ii)=>{ const it2=typeof it==='string'?{text:it}:it; return {key:ii,num:ii+1,rich:this.md(it2.text),hasSubs:!!(it2.subs&&it2.subs.length),subs:(it2.subs||[]).map((ss,si)=>({key:si,rich:this.md(ss)}))}; }); }
+      else if(b.t==='list'){ o.isList=true; o.items=b.items.map((it,ii)=>({key:ii,rich:this.md(typeof it==='string'?it:it.text)})); }
+      else if(b.t==='callout'){ o.isCallout=true; o.title=b.title; o.rich=this.md(b.text); }
+      return o;
+    });
+    const outlineRows=outline.map(o=>({key:o.key,text:o.text,style:'display:block;padding:5px 10px;border-radius:7px;font:400 13px/1.4 var(--font-ui);color:var(--text-2);cursor:pointer;border-left:2px solid var(--border);',hover:{color:'var(--text)',background:'var(--surface-2)'},onClick:()=>this.scrollTo(o.anchor)}));
+
+    // links / backlinks
+    const linkedNotes=(note.links||[]).filter(id=>this.notes[id]&&id!==note.id).map(id=>({key:id,title:this.notes[id].title,onClick:()=>this.select(id)}));
+    const backlinks=this.order.filter(id=>id!==note.id&&(this.notes[id].links||[]).includes(note.id)).map(id=>{
+      const src=this.notes[id]; let ctx=src.summary; const md=this.toMarkdown(src); const re=new RegExp('\\[\\[[^\\]]*'+note.file.replace(/[.*+?^${}()|[\]\\#]/g,'\\$&').split(/\\?#/)[0],'i');
+      const flat=md.replace(/[#>*`|]/g,' ').replace(/\s+/g,' '); const idx=flat.toLowerCase().indexOf(note.file.toLowerCase().replace(/#/g,'')); if(idx>=0){ const st=Math.max(0,idx-40); ctx=(st>0?'…':'')+flat.slice(st,idx+note.file.length+40).trim()+'…'; }
+      return {key:id,title:src.title,context:ctx,onClick:()=>this.select(id)};
+    });
+
+    // details
+    const words=this.countWords(note);
+    const details=[
+      {key:'path',label:'Path',value:note.path},
+      {key:'fmt',label:'Format',value:'Markdown'},
+      {key:'mod',label:'Modified',value:note.updated},
+      {key:'words',label:'Words',value:String(words)},
+      {key:'links',label:'Links',value:String(linkedNotes.length)},
+      {key:'back',label:'Backlinks',value:String(backlinks.length)}
+    ];
+
+    // graph
+    const cx=450,cy=280,R=180;
+    const others=this.order.filter(id=>id!==note.id);
+    const pos={}; pos[note.id]={x:cx,y:cy};
+    others.forEach((id,i)=>{ const a=(-90+i*(360/others.length))*Math.PI/180; pos[id]={x:cx+R*Math.cos(a),y:cy+R*Math.sin(a)}; });
+    const edgeSet=new Set(); const edgePairs=[];
+    this.order.forEach(id=>{ (this.notes[id].links||[]).forEach(t=>{ if(!this.notes[t])return; const kk=[id,t].sort().join('|'); if(!edgeSet.has(kk)){ edgeSet.add(kk); edgePairs.push([id,t]); } }); });
+    const connected=new Set(); edgePairs.forEach(([a,b])=>{ if(a===note.id) connected.add(b); if(b===note.id) connected.add(a); });
+    const graphEdges=edgePairs.map((p,i)=>{ const touch=p[0]===note.id||p[1]===note.id; return {key:i,x1:pos[p[0]].x,y1:pos[p[0]].y,x2:pos[p[1]].x,y2:pos[p[1]].y,stroke:touch?'var(--accent)':'var(--border-strong)',width:touch?2.2:1.4}; });
+    const graphNodes=this.order.map(id=>{ const active=id===note.id; const conn=connected.has(id); const p=pos[id]; const r=active?27:20;
+      return {key:id,x:p.x,y:p.y,r,rOuter:active?r+8:0,halo:active?'var(--accent-soft)':'transparent',fill:active?'var(--accent)':'var(--surface)',stroke:active?'var(--accent)':(conn?'var(--accent)':'var(--border-strong)'),sw:active?0:2,textColor:active?'var(--text)':(conn?'var(--text)':'var(--text-2)'),labelY:p.y+r+18,label:this.notes[id].file.length>18?this.notes[id].file.slice(0,17)+'…':this.notes[id].file,labelStyle:`font:${active?'600':'500'} 13px/1 var(--font-ui);`,onClick:()=>this.select(id)}; });
+
+    // palette
+    const pq=s.paletteQuery.trim().toLowerCase();
+    const palList=this.order.filter(id=>{ if(!pq) return true; const n=this.notes[id]; return (n.title+' '+n.tags.join(' ')+' '+n.summary).toLowerCase().includes(pq); });
+    const palSel=Math.min(s.palSel,Math.max(0,palList.length-1));
+    const paletteResults=palList.map((id,i)=>{ const sel=i===palSel; return {key:id,title:this.notes[id].title,path:this.notes[id].path,selected:sel,iconColor:sel?'var(--accent-text)':'var(--text-3)',style:'display:flex;align-items:center;gap:12px;padding:10px 12px;border-radius:10px;cursor:pointer;'+(sel?'background:var(--accent-soft);':''),onSelect:()=>this.select(id),onHover:()=>this.setState({palSel:i})}; });
+
+    const rawText = s.rawDrafts[note.id]!=null ? s.rawDrafts[note.id] : this.toMarkdown(note);
+    const themeIcon = isDark
+      ? React.createElement('svg',{width:17,height:17,viewBox:'0 0 24 24',fill:'none',stroke:'currentColor','strokeWidth':2,strokeLinecap:'round',strokeLinejoin:'round'},React.createElement('circle',{cx:12,cy:12,r:4}),React.createElement('path',{d:'M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4'}))
+      : React.createElement('svg',{width:17,height:17,viewBox:'0 0 24 24',fill:'none',stroke:'currentColor','strokeWidth':2,strokeLinecap:'round',strokeLinejoin:'round'},React.createElement('path',{d:'M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z'}));
+    const saveIcon = s.savedFlash
+      ? React.createElement('svg',{width:15,height:15,viewBox:'0 0 24 24',fill:'none',stroke:'currentColor','strokeWidth':2.6,strokeLinecap:'round',strokeLinejoin:'round'},React.createElement('path',{d:'M20 6 9 17l-5-5'}))
+      : React.createElement('svg',{width:15,height:15,viewBox:'0 0 24 24',fill:'none',stroke:'currentColor','strokeWidth':2,strokeLinecap:'round',strokeLinejoin:'round'},React.createElement('path',{d:'M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z'}),React.createElement('path',{d:'M17 21v-8H7v8M7 3v5h8'}));
+
+    return {
+      rootRef:this.rootRef, scrollRef:this.scrollRef, searchRef:this.searchRef, paletteRef:this.paletteRef,
+      theme:s.theme, accent:this.props.accent||'iris', face:this.props.readingFace==='Sans'?'sans':'serif',
+      themeIcon, toggleTheme:()=>this.toggleTheme(),
+      noteCount:this.order.length, indexStatus:s.rebuilding?'Rebuilding index…':'Search index ready',
+      // search
+      query:q, hasQuery:q.trim().length>0, onSearch:e=>this.onSearch(e), clearSearch:()=>this.clearSearch(),
+      searchResults, resultLabel:rawRes.length+' result'+(rawRes.length===1?'':'s'), noResults:q.trim().length>0&&rawRes.length===0,
+      showTree:q.trim().length===0, treeRows,
+      // actions
+      openPalette:()=>this.setState({paletteOpen:true,paletteQuery:'',palSel:0},()=>{if(this.paletteRef.current)this.paletteRef.current.focus();}),
+      newNote:()=>this.toast('New note created'), importNote:()=>this.toast('Choose a Markdown file to import…'),
+      rebuild:()=>{ if(s.rebuilding)return; this.setState({rebuilding:true}); clearTimeout(this._rb); this._rb=setTimeout(()=>{ this.setState({rebuilding:false}); this.toast('Index rebuilt · '+this.order.length+' notes'); },1300); },
+      rebuildLabel:s.rebuilding?'Rebuilding…':'Rebuild index',
+      rebuildSpinStyle:'display:flex;'+(s.rebuilding?'animation:gm-spin .9s linear infinite;':''),
+      // breadcrumb + meta
+      hasFolder:!!note.folder, folderName:note.folder, fileNameShort:note.file, updated:note.updated, wordCount:words, readTime:Math.max(1,Math.round(words/200))+' min read',
+      // tabs
+      onTabNote:()=>this.setState({mode:'note'}), onTabGraph:()=>this.setState({mode:'graph'}),
+      tabNoteStyle:s.mode==='note'?tabOn:tabOff, tabGraphStyle:s.mode==='graph'?tabOn:tabOff,
+      // source/save
+      toggleSource:()=>this.setState(st=>({raw:!st.raw,mode:'note'})),
+      sourceBtnStyle:secBtn+(s.raw?'background:var(--accent-soft);color:var(--accent-text);border:1px solid var(--accent-soft-line);':'background:var(--surface);color:var(--text-2);border:1px solid var(--border-strong);'),
+      sourceLabel:s.raw?'Preview':'Source',
+      save:()=>{ this.setState({savedFlash:true}); clearTimeout(this._sv); this._sv=setTimeout(()=>this.setState({savedFlash:false}),1500); this.toast('Saved to disk'); },
+      saveLabel:s.savedFlash?'Saved':'Save', saveIcon,
+      rawText, onRawInput:e=>{ const v=e.target.value; this.setState(st=>({rawDrafts:{...st.rawDrafts,[note.id]:v}})); },
+      // views
+      showRendered:s.mode==='note'&&!s.raw, showSource:s.mode==='note'&&s.raw, showGraph:s.mode==='graph',
+      // article
+      tags:note.tags, noteTitle:note.title, noteSummary:note.summary, blocks,
+      // rail
+      showNoteRail:s.mode==='note', showGraphRail:s.mode==='graph',
+      outline:outlineRows, hasOutline:outlineRows.length>0, noOutline:outlineRows.length===0,
+      details,
+      linkedNotes, linkedCount:linkedNotes.length, hasLinked:linkedNotes.length>0, noLinked:linkedNotes.length===0,
+      backlinks, backlinkCount:backlinks.length, hasBacklinks:backlinks.length>0, noBacklinks:backlinks.length===0,
+      graphNodes, graphEdges, edgeCount:edgePairs.length,
+      // palette
+      paletteOpen:s.paletteOpen, paletteQuery:s.paletteQuery, closePalette:()=>this.setState({paletteOpen:false}), stop:e=>e.stopPropagation(),
+      onPaletteInput:e=>this.setState({paletteQuery:e.target.value,palSel:0}),
+      onPaletteKey:e=>{ if(e.key==='ArrowDown'){e.preventDefault();this.setState(st=>({palSel:Math.min(palList.length-1,st.palSel+1)}));} else if(e.key==='ArrowUp'){e.preventDefault();this.setState(st=>({palSel:Math.max(0,st.palSel-1)}));} else if(e.key==='Enter'){e.preventDefault(); if(palList[palSel]) this.select(palList[palSel]);} },
+      paletteResults, paletteEmpty:palList.length===0,
+      // toast
+      toastShown:!!s.toast, toastMsg:s.toast,
+      // hovers
+      hovSearch:{background:'var(--surface-3)',borderColor:'var(--border-strong)'},
+      hovBtn:{background:'var(--surface-2)'},
+      hovPrimary:{background:'var(--accent-hover)'},
+      hovIcon:{background:'var(--surface-2)',color:'var(--text)'},
+      hovResult:{background:'var(--surface-2)'},
+      hovCard:{borderColor:'var(--accent-soft-line)',background:'var(--surface-2)'},
+      focusInput:{borderColor:'var(--accent)',boxShadow:'0 0 0 3px var(--accent-soft)'},
+      focusPlain:{}
+    };
+  }
+}
+</script>
+</body>
+</html>

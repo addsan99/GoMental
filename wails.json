@@ -1,0 +1,15 @@
+{
+  "$schema": "https://wails.io/schemas/config.v2.json",
+  "name": "GoMental",
+  "outputfilename": "GoMental",
+  "frontend:install": "node scripts/npm-install.mjs",
+  "frontend:build": "node node_modules/vite/bin/vite.js build",
+  "frontend:dev:watcher": "node node_modules/vite/bin/vite.js",
+  "frontend:dev:serverUrl": "auto",
+  "author": {
+    "name": "Addy Santo",
+    "email": "addys@santo.ninja"
+  }
+}
+
+

@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8"/>
+    <meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+    <title>GoMental</title>
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg"/>
+    <link rel="alternate icon" type="image/x-icon" href="/favicon.ico"/>
+    <!-- Prioritise the splash logo so it paints with the very first frame. -->
+    <link rel="preload" as="image" href="/gomental-lockup-rainbow-light.png"/>
+    <!-- Fonts are self-hosted (bundled via @fontsource in the JS entry), so there
+         is no external font stylesheet to block first paint — the splash paints
+         immediately and the reading serif applies once its woff2 subset loads. -->
+
+</head>
+<body>
+<style>
+    /* Branded splash shown between window-show and React mount. React replaces
+       the #root contents on first render, so this is only visible while the app
+       bundle loads. Kept inline so it needs no extra request to appear. */
+    #gm-splash {
+        position: fixed;
+        inset: 0;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 22px;
+        background: #f5f4ef;
+        z-index: 9999;
+    }
+    #gm-splash img {
+        width: 220px;
+        max-width: 60vw;
+        height: auto;
+    }
+    #gm-splash .gm-splash-spinner {
+        width: 26px;
+        height: 26px;
+        border: 3px solid rgba(0, 0, 0, 0.12);
+        border-top-color: rgba(0, 0, 0, 0.4);
+        border-radius: 50%;
+        animation: gm-splash-spin 0.8s linear infinite;
+    }
+    @keyframes gm-splash-spin {
+        to { transform: rotate(360deg); }
+    }
+    @media (prefers-color-scheme: dark) {
+        #gm-splash {
+            background: #17181c;
+        }
+        #gm-splash .gm-splash-spinner {
+            border-color: rgba(255, 255, 255, 0.16);
+            border-top-color: rgba(255, 255, 255, 0.5);
+        }
+    }
+</style>
+<div id="root">
+    <div id="gm-splash">
+        <picture>
+            <source srcset="/gomental-lockup-rainbow-dark.png" media="(prefers-color-scheme: dark)"/>
+            <img src="/gomental-lockup-rainbow-light.png" alt="GoMental"/>
+        </picture>
+        <div class="gm-splash-spinner"></div>
+    </div>
+</div>
+<script src="./src/main.tsx" type="module"></script>
+</body>
+</html>
+
