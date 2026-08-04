@@ -15,7 +15,10 @@ import (
 	index "github.com/blevesearch/bleve_index_api"
 )
 
-const DefaultLimit = 20
+const (
+	DefaultLimit        = 20
+	SearchSchemaVersion = 3
+)
 
 type BleveIndex struct {
 	path  string
@@ -25,6 +28,7 @@ type BleveIndex struct {
 type storedDocument struct {
 	ID          string   `json:"id"`
 	Path        string   `json:"path"`
+	NameText    string   `json:"nameText"`
 	Title       string   `json:"title"`
 	Body        string   `json:"body"`
 	Headings    []string `json:"headings"`
@@ -152,7 +156,7 @@ func indexMapping() mapping.IndexMapping {
 	// this requires a full reindex (Rebuild) since scoring is baked into segments.
 	idx.ScoringModel = index.BM25Scoring
 	doc := bleve.NewDocumentMapping()
-	for _, field := range []string{"title", "body", "headings", "aliases", "linkTargets"} {
+	for _, field := range []string{"nameText", "title", "body", "headings", "aliases", "linkTargets"} {
 		m := bleve.NewTextFieldMapping()
 		m.Store = true
 		doc.AddFieldMappingsAt(field, m)
@@ -176,6 +180,7 @@ func buildQuery(input domain.SearchQuery) querypkg.Query {
 	text := strings.TrimSpace(input.Text)
 	if text != "" {
 		textQuery := bleve.NewDisjunctionQuery(
+			boostedMatch(text, "nameText", 6),
 			boostedMatch(text, "title", 5),
 			boostedMatch(text, "aliases", 4),
 			boostedMatch(text, "headings", 3),
@@ -184,6 +189,7 @@ func buildQuery(input domain.SearchQuery) querypkg.Query {
 			boostedMatch(text, "linkTargets", 1),
 		)
 		prefix := bleve.NewDisjunctionQuery(
+			prefixQuery(text, "nameText", 2.5),
 			prefixQuery(text, "title", 2),
 			prefixQuery(text, "headings", 1.5),
 		)
@@ -235,6 +241,7 @@ func toStored(document domain.SearchDocument) storedDocument {
 	return storedDocument{
 		ID:          string(document.ID),
 		Path:        string(document.Path),
+		NameText:    searchableNameText(document),
 		Title:       document.Title,
 		Body:        document.Body,
 		Headings:    document.Headings,
@@ -244,6 +251,15 @@ func toStored(document domain.SearchDocument) storedDocument {
 		Favorite:    document.Favorite,
 		ModifiedAt:  document.ModifiedAt,
 	}
+}
+
+func searchableNameText(document domain.SearchDocument) string {
+	id := string(document.ID)
+	path := string(document.Path)
+	base := strings.TrimSuffix(filepath.Base(path), filepath.Ext(path))
+	normalizedID := strings.NewReplacer("/", " ", "\\", " ", "-", " ", "_", " ").Replace(id)
+	normalizedPath := strings.NewReplacer("/", " ", "\\", " ", "-", " ", "_", " ").Replace(path)
+	return strings.Join([]string{id, path, base, normalizedID, normalizedPath}, " ")
 }
 
 func WorkspaceSearchPath(workspaceRoot string) string {
