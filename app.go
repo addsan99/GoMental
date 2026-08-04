@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -37,6 +39,10 @@ type App struct {
 	// the workspace to a configured root, optionally tracks a git remote as the
 	// source of truth, and (in git mode) makes the workspace read-only.
 	viewer *viewerRuntime
+
+	gitMu         sync.Mutex
+	gitWriter     *gitsync.WritableManager
+	gitExitAction string
 }
 
 type AppInfo struct {
@@ -55,12 +61,18 @@ type AppInfo struct {
 // appGitStatus is the JSON shape the SPA's GitStatusInfo type consumes. It is
 // the desktop counterpart of httpapi.gitStatusJSON.
 type appGitStatus struct {
-	Remote     string  `json:"remote"`
-	Ref        string  `json:"ref"`
-	Commit     string  `json:"commit"`
-	LastSyncAt *string `json:"lastSyncAt"`
-	LastError  string  `json:"lastError"`
-	Syncing    bool    `json:"syncing"`
+	Remote       string  `json:"remote"`
+	Ref          string  `json:"ref"`
+	BaseRef      string  `json:"baseRef,omitempty"`
+	Branch       string  `json:"branch,omitempty"`
+	Commit       string  `json:"commit"`
+	Ahead        int     `json:"ahead,omitempty"`
+	Dirty        bool    `json:"dirty,omitempty"`
+	PullRequest  string  `json:"pullRequest,omitempty"`
+	LastSyncAt   *string `json:"lastSyncAt"`
+	LastPushedAt *string `json:"lastPushedAt,omitempty"`
+	LastError    string  `json:"lastError"`
+	Syncing      bool    `json:"syncing"`
 }
 
 // GitSyncResult is returned by the GitSync binding — the same fields the HTTP
@@ -71,6 +83,12 @@ type GitSyncResult struct {
 	NewCommit string `json:"newCommit"`
 	Changed   int    `json:"changed"`
 	Deleted   int    `json:"deleted"`
+}
+
+type GitPRResult struct {
+	URL    string `json:"url"`
+	Number int    `json:"number"`
+	Merged bool   `json:"merged"`
 }
 
 // viewerRuntime holds the pinned workspace + optional git tracking state for the
@@ -186,6 +204,7 @@ func (a *App) domReady(ctx context.Context) {
 }
 
 func (a *App) shutdown(ctx context.Context) {
+	a.finalizeGitOnExit(ctx)
 	a.mu.Lock()
 	host := a.host
 	sub := a.sub
@@ -202,6 +221,13 @@ func (a *App) shutdown(ctx context.Context) {
 
 func (a *App) Info() AppInfo {
 	info := AppInfo{Name: "GoMental", Description: "Local-first OKF notes and knowledge graph", Phase: "Phase 16 server host"}
+	if st := a.gitWriterStatus(); st != nil {
+		info.Mode = "writable-git"
+		info.Workspace = ""
+		info.ReadOnly = false
+		info.Git = st
+		return info
+	}
 	if a.viewer != nil {
 		info.Mode = "viewer"
 		info.Workspace = a.viewer.root
@@ -234,6 +260,27 @@ func gitStatusToJSON(st gitsync.Status) *appGitStatus {
 	}
 }
 
+func writableGitStatusToJSON(st gitsync.WritableStatus) *appGitStatus {
+	var lastPushedAt *string
+	if st.LastPushedAt != nil {
+		s := st.LastPushedAt.UTC().Format(time.RFC3339)
+		lastPushedAt = &s
+	}
+	return &appGitStatus{
+		Remote:       st.Remote,
+		Ref:          st.Branch,
+		BaseRef:      st.BaseRef,
+		Branch:       st.Branch,
+		Commit:       st.Commit,
+		Ahead:        st.Ahead,
+		Dirty:        st.Dirty,
+		PullRequest:  st.PullRequest,
+		LastPushedAt: lastPushedAt,
+		LastError:    st.LastError,
+		Syncing:      st.Syncing,
+	}
+}
+
 // GitSync triggers a fetch+reset of the working copy (viewer git mode only). The
 // workspace watcher reconciles the resulting content changes and emits
 // note/graph events; the manager emits git:synced, which the SPA toasts.
@@ -254,6 +301,30 @@ func (a *App) GitSync() (GitSyncResult, error) {
 	}, nil
 }
 
+func (a *App) GitOpenPullRequest() (GitPRResult, error) {
+	mgr := a.gitWriterSnapshot()
+	if mgr == nil {
+		return GitPRResult{}, errors.New("writable git is not enabled for this workspace")
+	}
+	res, err := mgr.OpenPullRequest(a.context(), "Update GoMental workspace", "Updates saved from GoMental.")
+	if err != nil {
+		return GitPRResult{}, err
+	}
+	return GitPRResult{URL: res.URL, Number: res.Number, Merged: res.Merged}, nil
+}
+
+func (a *App) GitMergePullRequest() (GitPRResult, error) {
+	mgr := a.gitWriterSnapshot()
+	if mgr == nil {
+		return GitPRResult{}, errors.New("writable git is not enabled for this workspace")
+	}
+	res, err := mgr.MergePullRequest(a.context(), "Update GoMental workspace", "Updates saved from GoMental.")
+	if err != nil {
+		return GitPRResult{}, err
+	}
+	return GitPRResult{URL: res.URL, Number: res.Number, Merged: res.Merged}, nil
+}
+
 func (a *App) SelectWorkspaceDirectory() (string, error) {
 	if !a.mustHost().Environment().NativeDialogs {
 		return "", errors.New("native directory picker is not available in server mode")
@@ -269,8 +340,13 @@ func (a *App) OpenWorkspace(root string) (application.WorkspaceDTO, error) {
 			return application.WorkspaceDTO{}, err
 		}
 		root = a.viewer.root
+	} else if err := a.configureWritableGit(root); err != nil {
+		return application.WorkspaceDTO{}, err
 	}
 	dto, err := a.service().OpenWorkspace(a.context(), root)
+	if err != nil {
+		a.clearWritableGit()
+	}
 	if err == nil && a.viewer != nil {
 		// Start polling only after the watcher is live, so pulled changes are
 		// reconciled.
@@ -295,28 +371,44 @@ func (a *App) SaveNote(req application.SaveNoteRequest) (application.NoteDTO, er
 	if a.writesBlocked() {
 		return application.NoteDTO{}, errReadOnly
 	}
-	return a.service().SaveNote(a.context(), req)
+	dto, err := a.service().SaveNote(a.context(), req)
+	if err != nil {
+		return application.NoteDTO{}, err
+	}
+	return dto, a.commitWritableGit("Update "+dto.ID, dto.Path)
 }
 
 func (a *App) SetNoteFavorite(id string, favorite bool) (application.NoteDTO, error) {
 	if a.writesBlocked() {
 		return application.NoteDTO{}, errReadOnly
 	}
-	return a.service().SetNoteFavorite(a.context(), id, favorite)
+	dto, err := a.service().SetNoteFavorite(a.context(), id, favorite)
+	if err != nil {
+		return application.NoteDTO{}, err
+	}
+	return dto, a.commitWritableGit("Update "+dto.ID, dto.Path)
 }
 
 func (a *App) ImportURL(req application.ImportURLRequest) (application.NoteDTO, error) {
 	if a.writesBlocked() {
 		return application.NoteDTO{}, errReadOnly
 	}
-	return a.service().ImportURL(a.context(), req)
+	dto, err := a.service().ImportURL(a.context(), req)
+	if err != nil {
+		return application.NoteDTO{}, err
+	}
+	return dto, a.commitWritableGit("Import "+dto.ID, dto.Path)
 }
 
 func (a *App) SaveNoteAsset(req application.SaveNoteAssetRequest) (application.SaveNoteAssetResponse, error) {
 	if a.writesBlocked() {
 		return application.SaveNoteAssetResponse{}, errReadOnly
 	}
-	return a.service().SaveNoteAsset(a.context(), req)
+	resp, err := a.service().SaveNoteAsset(a.context(), req)
+	if err != nil {
+		return application.SaveNoteAssetResponse{}, err
+	}
+	return resp, a.commitWritableGit("Add asset for "+req.NoteID, resp.Path)
 }
 
 func (a *App) LoadNoteAssetDataURL(req application.NoteAssetRequest) (string, error) {
@@ -327,20 +419,129 @@ func (a *App) DeleteNote(id string) error {
 	if a.writesBlocked() {
 		return errReadOnly
 	}
-	return a.service().DeleteNote(a.context(), id)
+	if err := a.service().DeleteNote(a.context(), id); err != nil {
+		return err
+	}
+	return a.commitWritableGit("Delete "+id, notePathForID(id))
 }
 
 func (a *App) MoveNote(req application.MoveNoteRequest) (application.NoteDTO, error) {
 	if a.writesBlocked() {
 		return application.NoteDTO{}, errReadOnly
 	}
-	return a.service().MoveNote(a.context(), req)
+	dto, err := a.service().MoveNote(a.context(), req)
+	if err != nil {
+		return application.NoteDTO{}, err
+	}
+	return dto, a.commitWritableGit("Move "+req.ID+" to "+req.NewID, notePathForID(req.ID), dto.Path)
 }
 
 // writesBlocked reports whether content-mutating bindings should be rejected —
 // true in read-only viewer mode.
 func (a *App) writesBlocked() bool {
 	return a.viewer != nil && a.viewer.readOnly
+}
+
+func (a *App) configureWritableGit(root string) error {
+	a.clearWritableGit()
+	abs, err := filepath.Abs(root)
+	if err != nil {
+		return err
+	}
+	abs = filepath.Clean(abs)
+	settings, err := a.service().LoadSettings(a.context())
+	if err != nil {
+		return err
+	}
+	ws, ok := workspaceSettingsForPath(settings, abs)
+	if !ok || ws.AccessMode != "writableGit" || strings.TrimSpace(ws.GitURL) == "" {
+		return nil
+	}
+	mgr, err := gitsync.NewWritable(gitsync.WritableConfig{
+		Remote:     ws.GitURL,
+		BaseRef:    ws.GitBaseRef,
+		Branch:     ws.GitBranch,
+		Dir:        abs,
+		Credential: gitsync.Credential{Username: ws.GitUsername, Token: ws.GitToken},
+		Notify:     a.mustHost().Hub().Publish,
+	})
+	if err != nil {
+		return err
+	}
+	if err := mgr.Ensure(a.context()); err != nil {
+		return err
+	}
+	a.gitMu.Lock()
+	a.gitWriter = mgr
+	a.gitExitAction = ws.GitExitAction
+	a.gitMu.Unlock()
+	return nil
+}
+
+func (a *App) clearWritableGit() {
+	a.gitMu.Lock()
+	a.gitWriter = nil
+	a.gitExitAction = ""
+	a.gitMu.Unlock()
+}
+
+func (a *App) gitWriterSnapshot() *gitsync.WritableManager {
+	a.gitMu.Lock()
+	defer a.gitMu.Unlock()
+	return a.gitWriter
+}
+
+func (a *App) gitWriterStatus() *appGitStatus {
+	mgr := a.gitWriterSnapshot()
+	if mgr == nil {
+		return nil
+	}
+	return writableGitStatusToJSON(mgr.Status())
+}
+
+func (a *App) commitWritableGit(message string, paths ...string) error {
+	mgr := a.gitWriterSnapshot()
+	if mgr == nil {
+		return nil
+	}
+	_, err := mgr.CommitAndPush(a.context(), message, paths)
+	return err
+}
+
+func (a *App) finalizeGitOnExit(ctx context.Context) {
+	mgr := a.gitWriterSnapshot()
+	if mgr == nil {
+		return
+	}
+	a.gitMu.Lock()
+	action := a.gitExitAction
+	a.gitMu.Unlock()
+	switch action {
+	case "autoPr":
+		_, _ = mgr.OpenPullRequest(ctx, "Update GoMental workspace", "Updates saved from GoMental.")
+	case "autoMerge":
+		_, _ = mgr.MergePullRequest(ctx, "Update GoMental workspace", "Updates saved from GoMental.")
+	}
+}
+
+func workspaceSettingsForPath(settings application.Settings, path string) (application.WorkspaceSettings, bool) {
+	for key, value := range settings.Workspaces {
+		abs, err := filepath.Abs(key)
+		if err == nil {
+			key = filepath.Clean(abs)
+		}
+		if strings.EqualFold(filepath.Clean(key), filepath.Clean(path)) {
+			return value, true
+		}
+	}
+	return application.WorkspaceSettings{}, false
+}
+
+func notePathForID(id string) string {
+	id = strings.TrimSpace(id)
+	id = strings.TrimSuffix(id, ".md")
+	id = strings.ReplaceAll(id, `\`, "/")
+	return filepath.ToSlash(filepath.Clean(id + ".md"))
 }
 
 func (a *App) Search(req application.SearchQueryDTO) ([]application.SearchResultDTO, error) {

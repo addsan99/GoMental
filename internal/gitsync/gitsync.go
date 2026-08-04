@@ -8,6 +8,7 @@ package gitsync
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"os"
@@ -27,13 +28,23 @@ type Runner interface {
 // Config configures a Manager. Remote and Dir are required; everything else
 // has a sensible default filled in by New.
 type Config struct {
-	Remote      string                        // e.g. https://github.com/org/wiki.git (required)
-	Ref         string                        // branch/tag to track; default "main"
-	Dir         string                        // working-copy path == workspace root (required)
-	MetadataDir string                        // untracked dir to protect from clean; default ".workspace"
-	Runner      Runner                        // nil → execRunner
+	Remote      string                         // e.g. https://github.com/org/wiki.git (required)
+	Ref         string                         // branch/tag to track; default "main"
+	Dir         string                         // working-copy path == workspace root (required)
+	MetadataDir string                         // untracked dir to protect from clean; default ".workspace"
+	Credential  Credential                     // optional app-managed HTTPS credential
+	Runner      Runner                         // nil → execRunner
 	Notify      func(name string, payload any) // nil → no-op; hub.Publish in prod
-	Now         func() time.Time              // nil → time.Now (tests inject)
+	Now         func() time.Time               // nil → time.Now (tests inject)
+}
+
+type Credential struct {
+	Username string
+	Token    string
+}
+
+func (c Credential) IsSet() bool {
+	return strings.TrimSpace(c.Token) != ""
 }
 
 // Result reports what a single Sync did. Changed/Deleted/Renamed are
@@ -68,12 +79,17 @@ type Manager struct {
 
 // execRunner is the default Runner. It shells to the `git` binary, captures
 // stdout + stderr, and on failure returns an error carrying stderr.
-type execRunner struct{}
+type execRunner struct {
+	credential Credential
+}
 
-func (execRunner) Run(ctx context.Context, dir string, args ...string) (string, error) {
+func (r execRunner) Run(ctx context.Context, dir string, args ...string) (string, error) {
 	cmd := exec.CommandContext(ctx, "git", args...)
 	if dir != "" {
 		cmd.Dir = dir
+	}
+	if r.credential.IsSet() {
+		cmd.Env = append(os.Environ(), gitCredentialEnv(r.credential)...)
 	}
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
@@ -107,7 +123,7 @@ func New(cfg Config) (*Manager, error) {
 		cfg.MetadataDir = ".workspace"
 	}
 	if cfg.Runner == nil {
-		cfg.Runner = execRunner{}
+		cfg.Runner = execRunner{credential: cfg.Credential}
 	}
 	if cfg.Now == nil {
 		cfg.Now = time.Now
@@ -115,6 +131,20 @@ func New(cfg Config) (*Manager, error) {
 	m := &Manager{cfg: cfg}
 	m.status = Status{Remote: cfg.Remote, Ref: cfg.Ref}
 	return m, nil
+}
+
+func gitCredentialEnv(credential Credential) []string {
+	username := strings.TrimSpace(credential.Username)
+	if username == "" {
+		username = "x-access-token"
+	}
+	value := "AUTHORIZATION: basic " + base64.StdEncoding.EncodeToString([]byte(username+":"+credential.Token))
+	return []string{
+		"GIT_CONFIG_COUNT=1",
+		"GIT_CONFIG_KEY_0=http.https://github.com/.extraheader",
+		"GIT_CONFIG_VALUE_0=" + value,
+		"GIT_TERMINAL_PROMPT=0",
+	}
 }
 
 // notify safely invokes the configured Notify callback (no-op if nil).

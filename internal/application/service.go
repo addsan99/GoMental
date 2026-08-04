@@ -309,10 +309,15 @@ type GraphViewSettings struct {
 }
 
 type WorkspaceSettings struct {
-	DefaultType  string   `json:"defaultType"`
-	EnabledTypes []string `json:"enabledTypes"`
-	AccessMode   string   `json:"accessMode"`
-	GitURL       string   `json:"gitUrl,omitempty"`
+	DefaultType   string   `json:"defaultType"`
+	EnabledTypes  []string `json:"enabledTypes"`
+	AccessMode    string   `json:"accessMode"`
+	GitURL        string   `json:"gitUrl,omitempty"`
+	GitBaseRef    string   `json:"gitBaseRef,omitempty"`
+	GitBranch     string   `json:"gitBranch,omitempty"`
+	GitUsername   string   `json:"gitUsername,omitempty"`
+	GitToken      string   `json:"gitToken,omitempty"`
+	GitExitAction string   `json:"gitExitAction,omitempty"`
 }
 
 type Service struct {
@@ -1801,12 +1806,33 @@ func normalizeWorkspaceSettings(settings WorkspaceSettings) WorkspaceSettings {
 	if !containsString(settings.EnabledTypes, settings.DefaultType) {
 		settings.EnabledTypes = append([]string{settings.DefaultType}, settings.EnabledTypes...)
 	}
-	if settings.AccessMode != "readOnlyLocal" && settings.AccessMode != "readOnlyGit" && settings.AccessMode != "editable" {
+	if settings.AccessMode != "readOnlyLocal" && settings.AccessMode != "readOnlyGit" && settings.AccessMode != "writableGit" && settings.AccessMode != "editable" {
 		settings.AccessMode = defaults.AccessMode
 	}
 	settings.GitURL = strings.TrimSpace(settings.GitURL)
-	if settings.AccessMode != "readOnlyGit" {
+	settings.GitBaseRef = strings.TrimSpace(settings.GitBaseRef)
+	if settings.GitBaseRef == "" {
+		settings.GitBaseRef = "main"
+	}
+	settings.GitBranch = strings.TrimSpace(settings.GitBranch)
+	settings.GitUsername = strings.TrimSpace(settings.GitUsername)
+	settings.GitToken = strings.TrimSpace(settings.GitToken)
+	if settings.GitExitAction != "prompt" && settings.GitExitAction != "autoPr" && settings.GitExitAction != "autoMerge" && settings.GitExitAction != "none" {
+		settings.GitExitAction = "none"
+	}
+	if settings.AccessMode != "readOnlyGit" && settings.AccessMode != "writableGit" {
 		settings.GitURL = ""
+		settings.GitBaseRef = ""
+		settings.GitBranch = ""
+		settings.GitUsername = ""
+		settings.GitToken = ""
+		settings.GitExitAction = ""
+	}
+	if settings.AccessMode == "readOnlyGit" {
+		settings.GitBranch = ""
+		settings.GitUsername = ""
+		settings.GitToken = ""
+		settings.GitExitAction = ""
 	}
 	return settings
 }

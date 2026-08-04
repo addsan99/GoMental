@@ -39,6 +39,8 @@ import {
 import {
   Backlinks,
   DeleteNote,
+  GitMergePullRequest,
+  GitOpenPullRequest,
   GitSync,
   Info,
   ImportURL,
@@ -315,6 +317,33 @@ function App() {
     }
   }, [refreshInfo, showToast]);
 
+  const openGitPr = useCallback(async () => {
+    setInfo((prev) => (prev.git ? {...prev, git: {...prev.git, syncing: true}} : prev));
+    try {
+      const result = await GitOpenPullRequest();
+      showToast(result.url ? `Pull request #${result.number} ready` : 'Pull request ready');
+      if (result.url) {
+        window.open(result.url, '_blank', 'noopener,noreferrer');
+      }
+    } catch (err) {
+      showToast(errorMessage(err));
+    } finally {
+      await refreshInfo();
+    }
+  }, [refreshInfo, showToast]);
+
+  const mergeGitPr = useCallback(async () => {
+    setInfo((prev) => (prev.git ? {...prev, git: {...prev.git, syncing: true}} : prev));
+    try {
+      const result = await GitMergePullRequest();
+      showToast(result.merged ? `Merged pull request #${result.number}` : `Pull request #${result.number} ready`);
+    } catch (err) {
+      showToast(errorMessage(err));
+    } finally {
+      await refreshInfo();
+    }
+  }, [refreshInfo, showToast]);
+
   const loadNotes = useCallback(async (preferredID = '') => {
     const items = await ListNotes();
     setNotes(items);
@@ -335,6 +364,7 @@ function App() {
     try {
       const opened = await OpenWorkspace(path);
       setWorkspace(opened);
+      void refreshInfo();
       // Show the note list as soon as it's ready — this is the critical path.
       const {nextID} = await loadNotes(preferredNote);
       // Recent-list refresh and UI-state persistence are not needed for the
@@ -346,7 +376,7 @@ function App() {
     } finally {
       setBusy('');
     }
-  }, [busy, loadNotes, loadRecent, projectionActive, theme]);
+  }, [busy, loadNotes, loadRecent, projectionActive, refreshInfo, theme]);
 
   const chooseWorkspace = useCallback(async () => {
     setError('');
@@ -540,6 +570,22 @@ function App() {
       showToast('Pulled latest from git');
       void refreshInfo();
     });
+    const offGitPushed = onEvent('git:pushed', () => {
+      showToast('Pushed branch to git');
+      void refreshInfo();
+    });
+    const offGitPr = onEvent('git:pr', (payload: {url?: string; number?: number}) => {
+      showToast(payload?.number ? `Pull request #${payload.number} ready` : 'Pull request ready');
+      void refreshInfo();
+    });
+    const offGitMerged = onEvent('git:merged', (payload: {number?: number}) => {
+      showToast(payload?.number ? `Merged pull request #${payload.number}` : 'Pull request merged');
+      void refreshInfo();
+    });
+    const offGitError = onEvent('git:error', (payload: {error?: string}) => {
+      showToast(payload?.error || 'Git operation failed');
+      void refreshInfo();
+    });
     return () => {
       offProgress();
       offRepairing();
@@ -548,6 +594,10 @@ function App() {
       offDeleted();
       offGraph();
       offGitSynced();
+      offGitPushed();
+      offGitPr();
+      offGitMerged();
+      offGitError();
     };
   }, [draft, isEditing, loadNotes, noteVersion, refreshInfo, savedContent, selectedID, showToast]);
 
@@ -1276,10 +1326,11 @@ function App() {
   const fileNameShort = basename(selectedID);
   const dirty = saveState === 'dirty' || saveState === 'conflict';
   const currentWorkspaceSettings = workspace?.root ? workspaceSettingsFor(settings, workspace.root) : defaultWorkspaceSettings();
-  const workspaceReadOnly = Boolean(workspace && currentWorkspaceSettings.accessMode !== 'editable');
+  const workspaceReadOnly = Boolean(workspace && currentWorkspaceSettings.accessMode !== 'editable' && currentWorkspaceSettings.accessMode !== 'writableGit');
   const readOnly = info.readOnly === true || workspaceReadOnly;
   const showSaveBar = Boolean(selectedNote) && !readOnly;
   const git = info.git ?? null;
+  const writableGit = currentWorkspaceSettings.accessMode === 'writableGit' || info.mode === 'writable-git';
   const readOnlyBannerText = info.readOnly === true
     ? 'Read-only — content is managed in git.'
     : currentWorkspaceSettings.accessMode === 'readOnlyGit'
@@ -1293,6 +1344,18 @@ function App() {
   // apply — the picker is a no-op in server mode and reopens the same root in
   // viewer mode. Hide it to avoid the dead/wandering control.
   const workspacePinned = info.mode === 'server' || info.mode === 'viewer';
+
+  useEffect(() => {
+    if (!writableGit || currentWorkspaceSettings.gitExitAction !== 'prompt') {
+      return;
+    }
+    const onBeforeUnload = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = '';
+    };
+    window.addEventListener('beforeunload', onBeforeUnload);
+    return () => window.removeEventListener('beforeunload', onBeforeUnload);
+  }, [currentWorkspaceSettings.gitExitAction, writableGit]);
 
   useEffect(() => {
     if (!workspace) {
@@ -1323,7 +1386,7 @@ function App() {
 
         <div className="gm-header-spacer" />
 
-        {git && (
+        {git && !writableGit && (
           <button
             type="button"
             className={git.lastError ? 'gm-git-chip gm-git-chip-error' : 'gm-git-chip'}
@@ -1335,6 +1398,27 @@ function App() {
             <span className="gm-git-ref">{git.ref}</span>
             <span className="gm-git-commit">{shortCommit(git.commit)}</span>
           </button>
+        )}
+        {git && writableGit && (
+          <div className="gm-git-actions" title={gitChipTitle(git)}>
+            <button
+              type="button"
+              className={git.lastError ? 'gm-git-chip gm-git-chip-error' : 'gm-git-chip'}
+              onClick={refreshInfo}
+              disabled={git.syncing}
+            >
+              <span className={git.syncing ? 'gm-git-dot gm-git-dot-syncing' : 'gm-git-dot'} />
+              <span className="gm-git-ref">{git.branch || git.ref}</span>
+              <span className="gm-git-commit">{shortCommit(git.commit)}</span>
+              {typeof git.ahead === 'number' && git.ahead > 0 && <span className="gm-git-ahead">+{git.ahead}</span>}
+            </button>
+            <button type="button" className="gm-btn gm-btn-ghost gm-btn-sm" onClick={openGitPr} disabled={git.syncing}>
+              PR
+            </button>
+            <button type="button" className="gm-btn gm-btn-ghost gm-btn-sm" onClick={mergeGitPr} disabled={git.syncing}>
+              Merge
+            </button>
+          </div>
         )}
 
         {!workspacePinned && (
@@ -2322,30 +2406,112 @@ function SettingsModal({
                             value={selectedWorkspaceSettings.accessMode}
                             onChange={(event) => updateSelectedWorkspaceSettings({
                               ...selectedWorkspaceSettings,
-                              accessMode: event.target.value as 'editable' | 'readOnlyLocal' | 'readOnlyGit',
+                              accessMode: event.target.value as GoMentalWorkspaceSettings['accessMode'],
                             })}
                           >
                             <option value="editable">Editable</option>
                             <option value="readOnlyLocal">Read-only local</option>
                             <option value="readOnlyGit">Read-only git connected</option>
+                            <option value="writableGit">Writable git branch</option>
                           </select>
                         </label>
-                        {selectedWorkspaceSettings.accessMode === 'readOnlyGit' && (
-                          <label className="gm-setting-row">
-                            <span>
-                              <strong>Git URL</strong>
-                              <small>Remote repository used for read-only git-connected workspaces.</small>
-                            </span>
-                            <input
-                              type="url"
-                              value={selectedWorkspaceSettings.gitUrl}
-                              placeholder="https://github.com/org/wiki.git"
-                              onChange={(event) => updateSelectedWorkspaceSettings({
-                                ...selectedWorkspaceSettings,
-                                gitUrl: event.target.value,
-                              })}
-                            />
-                          </label>
+                        {(selectedWorkspaceSettings.accessMode === 'readOnlyGit' || selectedWorkspaceSettings.accessMode === 'writableGit') && (
+                          <>
+                            <label className="gm-setting-row">
+                              <span>
+                                <strong>Git URL</strong>
+                                <small>Remote repository for this workspace.</small>
+                              </span>
+                              <input
+                                type="url"
+                                value={selectedWorkspaceSettings.gitUrl}
+                                placeholder="https://github.com/org/wiki.git"
+                                onChange={(event) => updateSelectedWorkspaceSettings({
+                                  ...selectedWorkspaceSettings,
+                                  gitUrl: event.target.value,
+                                })}
+                              />
+                            </label>
+                            <label className="gm-setting-row">
+                              <span>
+                                <strong>Base branch</strong>
+                                <small>The branch GoMental branches from and opens PRs into.</small>
+                              </span>
+                              <input
+                                value={selectedWorkspaceSettings.gitBaseRef}
+                                placeholder="main"
+                                onChange={(event) => updateSelectedWorkspaceSettings({
+                                  ...selectedWorkspaceSettings,
+                                  gitBaseRef: event.target.value,
+                                })}
+                              />
+                            </label>
+                          </>
+                        )}
+                        {selectedWorkspaceSettings.accessMode === 'writableGit' && (
+                          <>
+                            <label className="gm-setting-row">
+                              <span>
+                                <strong>Instance branch</strong>
+                                <small>Leave blank to use a machine-specific GoMental branch.</small>
+                              </span>
+                              <input
+                                value={selectedWorkspaceSettings.gitBranch}
+                                placeholder="gomental/this-machine/wiki"
+                                onChange={(event) => updateSelectedWorkspaceSettings({
+                                  ...selectedWorkspaceSettings,
+                                  gitBranch: event.target.value,
+                                })}
+                              />
+                            </label>
+                            <label className="gm-setting-row">
+                              <span>
+                                <strong>GitHub username</strong>
+                                <small>Optional. Used only with the app-managed token below.</small>
+                              </span>
+                              <input
+                                value={selectedWorkspaceSettings.gitUsername}
+                                placeholder="x-access-token"
+                                onChange={(event) => updateSelectedWorkspaceSettings({
+                                  ...selectedWorkspaceSettings,
+                                  gitUsername: event.target.value,
+                                })}
+                              />
+                            </label>
+                            <label className="gm-setting-row">
+                              <span>
+                                <strong>GitHub token</strong>
+                                <small>Optional. Allows push, PR, and merge without Git credential manager or SSH.</small>
+                              </span>
+                              <input
+                                type="password"
+                                value={selectedWorkspaceSettings.gitToken}
+                                placeholder="github_pat_..."
+                                onChange={(event) => updateSelectedWorkspaceSettings({
+                                  ...selectedWorkspaceSettings,
+                                  gitToken: event.target.value,
+                                })}
+                              />
+                            </label>
+                            <label className="gm-setting-row">
+                              <span>
+                                <strong>On exit</strong>
+                                <small>What GoMental should do with the branch when the app closes.</small>
+                              </span>
+                              <select
+                                value={selectedWorkspaceSettings.gitExitAction}
+                                onChange={(event) => updateSelectedWorkspaceSettings({
+                                  ...selectedWorkspaceSettings,
+                                  gitExitAction: event.target.value as GoMentalWorkspaceSettings['gitExitAction'],
+                                })}
+                              >
+                                <option value="none">Do nothing</option>
+                                <option value="prompt">Prompt me</option>
+                                <option value="autoPr">Open PR</option>
+                                <option value="autoMerge">Merge PR</option>
+                              </select>
+                            </label>
+                          </>
                         )}
                       </>
                     ) : (
@@ -3048,7 +3214,8 @@ function workspaceSettingsFor(settings: GoMentalSettings, path: string): GoMenta
 }
 
 function workspaceIsReadOnly(settings: GoMentalSettings, path: string): boolean {
-  return Boolean(path && workspaceSettingsFor(settings, path).accessMode !== 'editable');
+  const mode = workspaceSettingsFor(settings, path).accessMode;
+  return Boolean(path && mode !== 'editable' && mode !== 'writableGit');
 }
 
 function defaultWorkspaceSettings(): GoMentalWorkspaceSettings {
@@ -3057,6 +3224,11 @@ function defaultWorkspaceSettings(): GoMentalWorkspaceSettings {
     enabledTypes: NOTE_TEMPLATE_OPTIONS.map((template) => template.id),
     accessMode: 'editable',
     gitUrl: '',
+    gitBaseRef: 'main',
+    gitBranch: '',
+    gitUsername: '',
+    gitToken: '',
+    gitExitAction: 'none',
   };
 }
 
@@ -3069,14 +3241,22 @@ function normalizeWorkspaceSettings(value: GoMentalWorkspaceSettings): GoMentalW
     : defaults.defaultType;
   const normalizedEnabledTypes = enabledTypes.length > 0 ? enabledTypes : [...defaults.enabledTypes];
   const ensuredEnabledTypes = ensureEnabledType(normalizedEnabledTypes, defaultType);
-  const accessMode = value?.accessMode === 'readOnlyLocal' || value?.accessMode === 'readOnlyGit' || value?.accessMode === 'editable'
+  const accessMode = value?.accessMode === 'readOnlyLocal' || value?.accessMode === 'readOnlyGit' || value?.accessMode === 'writableGit' || value?.accessMode === 'editable'
     ? value.accessMode
     : defaults.accessMode;
+  const gitExitAction = value?.gitExitAction === 'prompt' || value?.gitExitAction === 'autoPr' || value?.gitExitAction === 'autoMerge' || value?.gitExitAction === 'none'
+    ? value.gitExitAction
+    : defaults.gitExitAction;
   return {
     defaultType,
     enabledTypes: ensuredEnabledTypes,
     accessMode,
-    gitUrl: accessMode === 'readOnlyGit' ? (value?.gitUrl || '').trim() : '',
+    gitUrl: accessMode === 'readOnlyGit' || accessMode === 'writableGit' ? (value?.gitUrl || '').trim() : '',
+    gitBaseRef: accessMode === 'readOnlyGit' || accessMode === 'writableGit' ? (value?.gitBaseRef || 'main').trim() : '',
+    gitBranch: accessMode === 'writableGit' ? (value?.gitBranch || '').trim() : '',
+    gitUsername: accessMode === 'writableGit' ? (value?.gitUsername || '').trim() : '',
+    gitToken: accessMode === 'writableGit' ? (value?.gitToken || '').trim() : '',
+    gitExitAction: accessMode === 'writableGit' ? gitExitAction : 'none',
   };
 }
 

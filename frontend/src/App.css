@@ -1139,6 +1139,20 @@ body.gm-resizing * { cursor: col-resize !important; }
 .gm-settings-save.error { color: #b4432e; }
 [data-theme="dark"] .gm-settings-save.error { color: #f0a08c; }
 
+.gm-git-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.gm-git-ahead {
+  padding: 1px 5px;
+  border-radius: 999px;
+  background: var(--accent-soft);
+  color: var(--accent-text);
+  font: 700 10px/1.3 var(--font-ui);
+}
+
 .gm-settings-body {
   display: grid;
   grid-template-columns: 220px minmax(0, 1fr);

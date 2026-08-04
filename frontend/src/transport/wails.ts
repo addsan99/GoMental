@@ -25,7 +25,7 @@ import {
   SelectWorkspaceDirectory,
 } from '../../wailsjs/go/main/App'
 import {EventsOn} from '../../wailsjs/runtime/runtime'
-import type {GitSyncResult, GoMentalSettings, MoveNoteRequest, NoteDTOWithVersion, SaveNoteRequestWithVersion, SetNoteFavoriteRequest} from './types'
+import type {GitPRResult, GitSyncResult, GoMentalSettings, MoveNoteRequest, NoteDTOWithVersion, SaveNoteRequestWithVersion, SetNoteFavoriteRequest} from './types'
 
 export {
   Backlinks,
@@ -82,6 +82,22 @@ export function GitSync(): Promise<GitSyncResult> {
     return Promise.reject(new Error('git sync is not available (not in viewer git mode)'))
   }
   return app.GitSync()
+}
+
+export function GitOpenPullRequest(): Promise<GitPRResult> {
+  const app = (window as any)?.go?.main?.App
+  if (!app || typeof app.GitOpenPullRequest !== 'function') {
+    return Promise.reject(new Error('writable git pull requests are not available in this build'))
+  }
+  return app.GitOpenPullRequest()
+}
+
+export function GitMergePullRequest(): Promise<GitPRResult> {
+  const app = (window as any)?.go?.main?.App
+  if (!app || typeof app.GitMergePullRequest !== 'function') {
+    return Promise.reject(new Error('writable git merge is not available in this build'))
+  }
+  return app.GitMergePullRequest()
 }
 
 export function LoadSettings(): Promise<GoMentalSettings> {

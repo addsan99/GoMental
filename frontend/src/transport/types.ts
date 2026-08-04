@@ -12,8 +12,14 @@ import type {application, main} from '../../wailsjs/go/models'
 export type GitStatusInfo = {
   remote: string
   ref: string
+  baseRef?: string
+  branch?: string
   commit: string
+  ahead?: number
+  dirty?: boolean
+  pullRequest?: string
   lastSyncAt?: string | null
+  lastPushedAt?: string | null
   lastError?: string
   syncing?: boolean
 }
@@ -42,6 +48,12 @@ export type GitSyncResult = {
   newCommit?: string
   changed?: number
   deleted?: number
+}
+
+export type GitPRResult = {
+  url: string
+  number: number
+  merged: boolean
 }
 
 // NoteDTO plus the optimistic-concurrency version token returned by
@@ -86,6 +98,11 @@ export type GoMentalSettings = {
 export type GoMentalWorkspaceSettings = {
   defaultType: string
   enabledTypes: string[]
-  accessMode: 'editable' | 'readOnlyLocal' | 'readOnlyGit'
+  accessMode: 'editable' | 'readOnlyLocal' | 'readOnlyGit' | 'writableGit'
   gitUrl: string
+  gitBaseRef: string
+  gitBranch: string
+  gitUsername: string
+  gitToken: string
+  gitExitAction: 'none' | 'prompt' | 'autoPr' | 'autoMerge'
 }
