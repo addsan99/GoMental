@@ -2,6 +2,8 @@ package gitsync
 
 import (
 	"context"
+	"io"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -122,6 +124,104 @@ func TestWritableCommitAndPushStagesOnlyGivenPaths(t *testing.T) {
 	}
 }
 
+func TestWritableCommitAllIncludesExternalNotes(t *testing.T) {
+	requireGit(t)
+	remote := makeRemote(t)
+	dir := filepath.Join(t.TempDir(), "clone")
+
+	m, err := NewWritable(WritableConfig{
+		Remote: remote,
+		Branch: "gomental/test-machine/wiki",
+		Dir:    dir,
+	})
+	if err != nil {
+		t.Fatalf("NewWritable: %v", err)
+	}
+	if err := m.Ensure(context.Background()); err != nil {
+		t.Fatalf("Ensure: %v", err)
+	}
+
+	writeFile(t, filepath.Join(dir, "copied", "note.md"), "# Copied note\n")
+	writeFile(t, filepath.Join(dir, ".workspace", "graph.sqlite"), "derived\n")
+	res, err := m.CommitAll(context.Background(), "Add externally copied notes")
+	if err != nil {
+		t.Fatalf("CommitAll: %v", err)
+	}
+	if !res.Committed {
+		t.Fatalf("result = %#v, want committed", res)
+	}
+	if err := m.pushBranch(context.Background()); err != nil {
+		t.Fatalf("pushBranch: %v", err)
+	}
+
+	check := filepath.Join(t.TempDir(), "check")
+	git(t, "", "clone", "--branch", "gomental/test-machine/wiki", remote, check)
+	data, err := os.ReadFile(filepath.Join(check, "copied", "note.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.ReplaceAll(string(data), "\r\n", "\n") != "# Copied note\n" {
+		t.Fatalf("copied note = %q", data)
+	}
+	if _, err := os.Stat(filepath.Join(check, ".workspace", "graph.sqlite")); !os.IsNotExist(err) {
+		t.Fatalf(".workspace file should not be pushed, stat err=%v", err)
+	}
+}
+
+func TestWritableOpenPullRequestPushesBranchFirst(t *testing.T) {
+	requireGit(t)
+	remote := makeRemote(t)
+	dir := filepath.Join(t.TempDir(), "clone")
+
+	var sawCreate bool
+	client := &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		switch {
+		case req.Method == http.MethodGet && strings.Contains(req.URL.Path, "/pulls"):
+			return jsonResponse(200, `[]`), nil
+		case req.Method == http.MethodPost && strings.Contains(req.URL.Path, "/pulls"):
+			data, _ := io.ReadAll(req.Body)
+			body := string(data)
+			if !strings.Contains(body, `"head":"acme:gomental/test-machine/wiki"`) {
+				t.Fatalf("create PR payload = %s, want owner-qualified head", body)
+			}
+			sawCreate = true
+			return jsonResponse(201, `{"html_url":"https://github.com/acme/wiki/pull/7","number":7}`), nil
+		default:
+			t.Fatalf("unexpected GitHub request: %s %s", req.Method, req.URL.String())
+			return jsonResponse(500, `{}`), nil
+		}
+	})}
+
+	m, err := NewWritable(WritableConfig{
+		Remote:     remote,
+		BaseRef:    "main",
+		Branch:     "gomental/test-machine/wiki",
+		Dir:        dir,
+		Credential: Credential{Token: "test-token"},
+		HTTPClient: client,
+	})
+	if err != nil {
+		t.Fatalf("NewWritable: %v", err)
+	}
+	if err := m.Ensure(context.Background()); err != nil {
+		t.Fatalf("Ensure: %v", err)
+	}
+	writeFile(t, filepath.Join(dir, "copied.md"), "# Copied through filesystem\n")
+	m.cfg.Remote = "https://github.com/acme/wiki.git"
+	m.status.Remote = m.cfg.Remote
+	if _, err := m.OpenPullRequest(context.Background(), "Update", "Body"); err != nil {
+		t.Fatalf("OpenPullRequest: %v", err)
+	}
+	if !sawCreate {
+		t.Fatalf("expected create PR API call")
+	}
+	check := filepath.Join(t.TempDir(), "check")
+	git(t, "", "clone", "--branch", "gomental/test-machine/wiki", remote, check)
+	if _, err := os.Stat(filepath.Join(check, "copied.md")); err != nil {
+		t.Fatalf("externally copied note should be pushed before PR: %v", err)
+	}
+}
+
 func TestParseGitHubRepo(t *testing.T) {
 	tests := map[string]githubRepo{
 		"https://github.com/acme/wiki.git": {Owner: "acme", Name: "wiki"},
@@ -136,5 +236,20 @@ func TestParseGitHubRepo(t *testing.T) {
 		if got != want {
 			t.Fatalf("parseGitHubRepo(%q) = %#v, want %#v", remote, got, want)
 		}
+	}
+}
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
+	return f(req)
+}
+
+func jsonResponse(status int, body string) *http.Response {
+	return &http.Response{
+		StatusCode: status,
+		Status:     http.StatusText(status),
+		Header:     make(http.Header),
+		Body:       io.NopCloser(strings.NewReader(body)),
 	}
 }

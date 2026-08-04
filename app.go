@@ -73,6 +73,7 @@ type appGitStatus struct {
 	LastPushedAt *string `json:"lastPushedAt,omitempty"`
 	LastError    string  `json:"lastError"`
 	Syncing      bool    `json:"syncing"`
+	Operation    string  `json:"operation,omitempty"`
 }
 
 // GitSyncResult is returned by the GitSync binding — the same fields the HTTP
@@ -257,6 +258,7 @@ func gitStatusToJSON(st gitsync.Status) *appGitStatus {
 		LastSyncAt: lastSyncAt,
 		LastError:  st.LastError,
 		Syncing:    st.Syncing,
+		Operation:  st.Operation,
 	}
 }
 
@@ -278,6 +280,7 @@ func writableGitStatusToJSON(st gitsync.WritableStatus) *appGitStatus {
 		LastPushedAt: lastPushedAt,
 		LastError:    st.LastError,
 		Syncing:      st.Syncing,
+		Operation:    st.Operation,
 	}
 }
 

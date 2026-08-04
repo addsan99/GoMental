@@ -41,6 +41,7 @@ type WritableStatus struct {
 	PullRequest  string     `json:"pullRequest"`
 	LastPushedAt *time.Time `json:"lastPushedAt"`
 	LastError    string     `json:"lastError"`
+	Operation    string     `json:"operation"`
 }
 
 type CommitResult struct {
@@ -104,8 +105,8 @@ func DefaultInstanceBranch(workspaceDir string) string {
 func (m *WritableManager) Ensure(ctx context.Context) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.status.Syncing = true
-	defer func() { m.status.Syncing = false }()
+	m.beginLocked("Syncing local notes from git")
+	defer m.finishLocked()
 
 	dir := m.cfg.Dir
 	if _, err := os.Stat(filepath.Join(dir, ".git")); err != nil {
@@ -156,8 +157,8 @@ func (m *WritableManager) Ensure(ctx context.Context) error {
 func (m *WritableManager) CommitAndPush(ctx context.Context, message string, paths []string) (CommitResult, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.status.Syncing = true
-	defer func() { m.status.Syncing = false }()
+	m.beginLocked("Committing local notes to git")
+	defer m.finishLocked()
 
 	paths = cleanRelPaths(paths)
 	if len(paths) == 0 {
@@ -186,6 +187,7 @@ func (m *WritableManager) CommitAndPush(ctx context.Context, message string, pat
 	if err != nil {
 		return CommitResult{}, m.fail(fmt.Errorf("gitsync writable: read commit: %w", err))
 	}
+	m.setOperationLocked("Pushing local notes to git")
 	if _, err := m.cfg.Runner.Run(ctx, m.cfg.Dir, "push", "-u", "origin", m.cfg.Branch); err != nil {
 		m.refreshLocked(ctx)
 		return CommitResult{Committed: true, Commit: short(strings.TrimSpace(head))}, m.fail(fmt.Errorf("gitsync writable: push branch: %w", err))
@@ -196,6 +198,39 @@ func (m *WritableManager) CommitAndPush(ctx context.Context, message string, pat
 	m.refreshLocked(ctx)
 	m.notify("git:pushed", map[string]any{"branch": m.cfg.Branch, "commit": m.status.Commit})
 	return CommitResult{Committed: true, Pushed: true, Commit: m.status.Commit}, nil
+}
+
+func (m *WritableManager) CommitAll(ctx context.Context, message string) (CommitResult, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.beginLocked("Committing local notes to git")
+	defer m.finishLocked()
+
+	args := append([]string{"add", "-A", "--", "."}, metadataExcludePathspecs(m.cfg.MetadataDir)...)
+	if _, err := m.cfg.Runner.Run(ctx, m.cfg.Dir, args...); err != nil {
+		return CommitResult{}, m.fail(fmt.Errorf("gitsync writable: stage workspace changes: %w", err))
+	}
+	statusArgs := append([]string{"status", "--porcelain", "--", "."}, metadataExcludePathspecs(m.cfg.MetadataDir)...)
+	out, err := m.cfg.Runner.Run(ctx, m.cfg.Dir, statusArgs...)
+	if err != nil {
+		return CommitResult{}, m.fail(fmt.Errorf("gitsync writable: inspect workspace changes: %w", err))
+	}
+	if strings.TrimSpace(out) == "" {
+		m.refreshLocked(ctx)
+		return CommitResult{Commit: m.status.Commit}, nil
+	}
+	if strings.TrimSpace(message) == "" {
+		message = "Update workspace from GoMental"
+	}
+	if _, err := m.cfg.Runner.Run(ctx, m.cfg.Dir, "commit", "-m", message); err != nil {
+		return CommitResult{}, m.fail(fmt.Errorf("gitsync writable: commit workspace changes: %w", err))
+	}
+	head, err := m.cfg.Runner.Run(ctx, m.cfg.Dir, "rev-parse", "HEAD")
+	if err != nil {
+		return CommitResult{}, m.fail(fmt.Errorf("gitsync writable: read commit: %w", err))
+	}
+	m.refreshLocked(ctx)
+	return CommitResult{Committed: true, Commit: short(strings.TrimSpace(head))}, nil
 }
 
 func (m *WritableManager) OpenPullRequest(ctx context.Context, title, body string) (PullRequestResult, error) {
@@ -217,6 +252,14 @@ func (m *WritableManager) createOrMergePullRequest(ctx context.Context, title, b
 	if strings.TrimSpace(title) == "" {
 		title = "Update GoMental workspace"
 	}
+	defer m.finish()
+	if _, err := m.CommitAll(ctx, "Update workspace from GoMental"); err != nil {
+		return PullRequestResult{}, m.fail(err)
+	}
+	if err := m.pushBranch(ctx); err != nil {
+		return PullRequestResult{}, m.fail(fmt.Errorf("gitsync writable: push branch before pull request: %w", err))
+	}
+	m.setOperation("Opening pull request")
 	pr, err := m.findOpenPullRequest(ctx, repo)
 	if err != nil {
 		return PullRequestResult{}, m.fail(err)
@@ -235,6 +278,7 @@ func (m *WritableManager) createOrMergePullRequest(ctx context.Context, title, b
 	if !merge {
 		return pr, nil
 	}
+	m.setOperation("Merging pull request")
 	if err := m.mergePullRequest(ctx, repo, pr.Number); err != nil {
 		return PullRequestResult{}, m.fail(err)
 	}
@@ -252,6 +296,24 @@ func (m *WritableManager) Status() WritableStatus {
 		s.LastPushedAt = &t
 	}
 	return s
+}
+
+func (m *WritableManager) pushBranch(ctx context.Context) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.beginLocked("Pushing local notes to git")
+	defer m.finishLocked()
+
+	if _, err := m.cfg.Runner.Run(ctx, m.cfg.Dir, "push", "-u", "origin", m.cfg.Branch); err != nil {
+		m.refreshLocked(ctx)
+		return err
+	}
+	now := m.cfg.Now()
+	m.status.LastPushedAt = &now
+	m.status.LastError = ""
+	m.refreshLocked(ctx)
+	m.notify("git:pushed", map[string]any{"branch": m.cfg.Branch, "commit": m.status.Commit})
+	return nil
 }
 
 func (m *WritableManager) refreshLocked(ctx context.Context) {
@@ -293,6 +355,53 @@ func (m *WritableManager) notify(name string, payload any) {
 	if m.cfg.Notify != nil {
 		m.cfg.Notify(name, payload)
 	}
+}
+
+func (m *WritableManager) beginLocked(operation string) {
+	m.status.Syncing = true
+	m.status.Operation = operation
+	m.notifyStatusLocked()
+}
+
+func (m *WritableManager) setOperation(operation string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.setOperationLocked(operation)
+}
+
+func (m *WritableManager) setOperationLocked(operation string) {
+	m.status.Syncing = true
+	m.status.Operation = operation
+	m.notifyStatusLocked()
+}
+
+func (m *WritableManager) finishLocked() {
+	m.status.Syncing = false
+	m.status.Operation = ""
+	m.notifyStatusLocked()
+}
+
+func (m *WritableManager) finish() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.finishLocked()
+}
+
+func (m *WritableManager) notifyStatusLocked() {
+	m.notify("git:status", map[string]any{
+		"remote":       m.status.Remote,
+		"ref":          m.status.Branch,
+		"baseRef":      m.status.BaseRef,
+		"branch":       m.status.Branch,
+		"commit":       m.status.Commit,
+		"ahead":        m.status.Ahead,
+		"dirty":        m.status.Dirty,
+		"pullRequest":  m.status.PullRequest,
+		"lastError":    m.status.LastError,
+		"syncing":      m.status.Syncing,
+		"operation":    m.status.Operation,
+		"lastPushedAt": m.status.LastPushedAt,
+	})
 }
 
 type githubRepo struct {
@@ -340,7 +449,7 @@ func (m *WritableManager) createPullRequest(ctx context.Context, repo githubRepo
 	payload := map[string]string{
 		"title": title,
 		"body":  body,
-		"head":  m.cfg.Branch,
+		"head":  repo.Owner + ":" + m.cfg.Branch,
 		"base":  m.cfg.BaseRef,
 	}
 	var pr struct {
