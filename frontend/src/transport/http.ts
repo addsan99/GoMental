@@ -1,6 +1,6 @@
 // HTTP transport: fetch-based implementation of the binding surface for browser (server) mode.
 import type {application, main} from '../../wailsjs/go/models'
-import type {GitSyncResult, GoMentalSettings, MoveNoteRequest, NoteDTOWithVersion, SaveNoteRequestWithVersion} from './types'
+import type {GitSyncResult, GoMentalSettings, MoveNoteRequest, NoteDTOWithVersion, SaveNoteRequestWithVersion, SetNoteFavoriteRequest} from './types'
 import {subscribe} from './events'
 
 // The generated App.d.ts references application.UIState, which is not defined in
@@ -29,8 +29,23 @@ function encodeID(id: string): string {
   return id.split('/').map(encodeURIComponent).join('/')
 }
 
+function serverBasePath(): string {
+  if (typeof window === 'undefined') {
+    return ''
+  }
+  const [first] = window.location.pathname.split('/').filter(Boolean)
+  if (!first || first === 'api' || first === 'mcp') {
+    return ''
+  }
+  return `/${first}`
+}
+
+function serverPath(path: string): string {
+  return `${serverBasePath()}${path}`
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(path, {
+  const response = await fetch(serverPath(path), {
     ...init,
     headers: {
       ...(init?.body ? {'Content-Type': 'application/json'} : {}),
@@ -84,6 +99,7 @@ export function ListNotesPage(req: application.ListNotesQueryDTO): Promise<appli
   if (req.sortBy) params.set('sort', req.sortBy)
   if (req.desc) params.set('desc', '1')
   if (req.tag) params.set('tag', req.tag)
+  if (req.favoritesOnly) params.set('favorites', '1')
   if (req.search) params.set('q', req.search)
   return request(`/api/notes?${params.toString()}`)
 }
@@ -96,6 +112,13 @@ export function SaveNote(req: SaveNoteRequestWithVersion): Promise<NoteDTOWithVe
   return request(`/api/notes/${encodeID(req.id)}`, {
     method: 'PUT',
     ...jsonBody({content: req.content, baseVersion: req.baseVersion, force: req.force}),
+  })
+}
+
+export function SetNoteFavorite(req: SetNoteFavoriteRequest): Promise<NoteDTOWithVersion> {
+  return request('/api/notes/favorite', {
+    method: 'PUT',
+    ...jsonBody({id: req.id, favorite: req.favorite}),
   })
 }
 

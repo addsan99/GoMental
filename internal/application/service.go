@@ -67,6 +67,7 @@ type NoteSummaryDTO struct {
 	Path       string   `json:"path"`
 	Type       string   `json:"type"`
 	Tags       []string `json:"tags"`
+	Favorite   bool     `json:"favorite"`
 	ModifiedAt string   `json:"modifiedAt"`
 }
 
@@ -74,6 +75,7 @@ type NoteDTO struct {
 	ID         string `json:"id"`
 	Path       string `json:"path"`
 	Content    string `json:"content"`
+	Favorite   bool   `json:"favorite"`
 	ModifiedAt string `json:"modifiedAt"`
 	// Version is an opaque optimistic-concurrency token derived from the file
 	// version (modtime+size). Clients round-trip it via SaveNoteRequest.BaseVersion.
@@ -128,10 +130,11 @@ type NoteAssetRequest struct {
 }
 
 type SearchQueryDTO struct {
-	Text       string   `json:"text"`
-	Tags       []string `json:"tags"`
-	PathPrefix string   `json:"pathPrefix"`
-	Limit      int      `json:"limit"`
+	Text          string   `json:"text"`
+	Tags          []string `json:"tags"`
+	PathPrefix    string   `json:"pathPrefix"`
+	FavoritesOnly bool     `json:"favoritesOnly"`
+	Limit         int      `json:"limit"`
 }
 
 type SearchResultDTO struct {
@@ -140,11 +143,13 @@ type SearchResultDTO struct {
 	Title     string   `json:"title"`
 	Score     float64  `json:"score"`
 	Fragments []string `json:"fragments"`
+	Favorite  bool     `json:"favorite"`
 }
 
 type GraphFilterDTO struct {
 	PathPrefix           string   `json:"pathPrefix"`
 	Tags                 []string `json:"tags"`
+	FavoritesOnly        bool     `json:"favoritesOnly"`
 	IncludeUnresolved    bool     `json:"includeUnresolved"`
 	IncludeSoftLinks     bool     `json:"includeSoftLinks"`
 	IncludeMetadataLinks bool     `json:"includeMetadataLinks"`
@@ -160,6 +165,7 @@ type GraphQueryDTO struct {
 	Types                []string `json:"types"`
 	Tags                 []string `json:"tags"`
 	PathPrefix           string   `json:"pathPrefix"`
+	FavoritesOnly        bool     `json:"favoritesOnly"`
 	IncludeSoftLinks     bool     `json:"includeSoftLinks"`
 	IncludeMetadataLinks bool     `json:"includeMetadataLinks"`
 	IncludeUnresolved    bool     `json:"includeUnresolved"`
@@ -167,13 +173,14 @@ type GraphQueryDTO struct {
 
 // ListNotesQueryDTO parameterizes a paginated note list. Limit 0 means "all".
 type ListNotesQueryDTO struct {
-	Offset int    `json:"offset"`
-	Limit  int    `json:"limit"`
-	SortBy string `json:"sortBy"`
-	Desc   bool   `json:"desc"`
-	Tag    string `json:"tag"`
-	Type   string `json:"type"`
-	Search string `json:"search"`
+	Offset        int    `json:"offset"`
+	Limit         int    `json:"limit"`
+	SortBy        string `json:"sortBy"`
+	Desc          bool   `json:"desc"`
+	Tag           string `json:"tag"`
+	Type          string `json:"type"`
+	Search        string `json:"search"`
+	FavoritesOnly bool   `json:"favoritesOnly"`
 }
 
 // NotesPageDTO is a page of note summaries plus the total matching the filter.
@@ -280,10 +287,11 @@ type RecentWorkspaceDTO struct {
 type UIState map[string]any
 
 type Settings struct {
-	Version    int                `json:"version"`
-	Appearance AppearanceSettings `json:"appearance"`
-	NoteView   NoteViewSettings   `json:"noteView"`
-	GraphView  GraphViewSettings  `json:"graphView"`
+	Version    int                          `json:"version"`
+	Appearance AppearanceSettings           `json:"appearance"`
+	NoteView   NoteViewSettings             `json:"noteView"`
+	GraphView  GraphViewSettings            `json:"graphView"`
+	Workspaces map[string]WorkspaceSettings `json:"workspaces"`
 }
 
 type AppearanceSettings struct {
@@ -298,6 +306,13 @@ type NoteViewSettings struct {
 type GraphViewSettings struct {
 	DefaultMode  string `json:"defaultMode"`
 	DefaultDepth int    `json:"defaultDepth"`
+}
+
+type WorkspaceSettings struct {
+	DefaultType  string   `json:"defaultType"`
+	EnabledTypes []string `json:"enabledTypes"`
+	AccessMode   string   `json:"accessMode"`
+	GitURL       string   `json:"gitUrl,omitempty"`
 }
 
 type Service struct {
@@ -520,13 +535,14 @@ func (s *Service) ListNotesPage(ctx context.Context, q ListNotesQueryDTO) (Notes
 		return NotesPageDTO{}, err
 	}
 	res, err := graphStore.ListNotes(ctx, graph.ListNotesOptions{
-		Offset: q.Offset,
-		Limit:  q.Limit,
-		SortBy: q.SortBy,
-		Desc:   q.Desc,
-		Tag:    q.Tag,
-		Type:   q.Type,
-		Search: q.Search,
+		Offset:        q.Offset,
+		Limit:         q.Limit,
+		SortBy:        q.SortBy,
+		Desc:          q.Desc,
+		Tag:           q.Tag,
+		Type:          q.Type,
+		Search:        q.Search,
+		FavoritesOnly: q.FavoritesOnly,
 	})
 	if err != nil {
 		return NotesPageDTO{}, appErr("notes.list_failed", "Could not list notes", err)
@@ -597,6 +613,58 @@ func (s *Service) SaveNote(ctx context.Context, req SaveNoteRequest) (NoteDTO, e
 	dto := noteDTO(read)
 	s.emit("note:updated", dto)
 	s.markDirty(read.ID)
+	return dto, nil
+}
+
+func (s *Service) SetNoteFavorite(ctx context.Context, id string, favorite bool) (NoteDTO, error) {
+	ws, err := s.workspaceSnapshot()
+	if err != nil {
+		return NoteDTO{}, err
+	}
+	noteID, err := ws.NormalizeNoteID(id)
+	if err != nil {
+		return NoteDTO{}, appErr("notes.invalid_id", "Invalid note id", err)
+	}
+	unlock := s.lockNote(noteID)
+	defer unlock()
+
+	repo, searchIndex, graphStore, err := s.sessionSnapshot()
+	if err != nil {
+		return NoteDTO{}, err
+	}
+	note, err := repo.Read(ctx, noteID)
+	if err != nil {
+		return NoteDTO{}, appErr("notes.read_failed", "Could not read note", err)
+	}
+	if next, changed := setFavoriteFrontmatter(note.Document.Raw, favorite); changed {
+		note.Document.Raw = next
+		if err := repo.Save(ctx, note); err != nil {
+			return NoteDTO{}, appErr("notes.save_failed", "Could not save favorite state", err)
+		}
+		note, err = repo.Read(ctx, noteID)
+		if err != nil {
+			return NoteDTO{}, appErr("notes.read_failed", "Could not read updated note", err)
+		}
+		if err := updateOneProjectionFast(ctx, repo, searchIndex, graphStore, s.corpusState(), note); err != nil {
+			var decodeErr domain.DecodeError
+			if !errors.As(err, &decodeErr) {
+				return NoteDTO{}, projectionUpdateErr(err)
+			}
+			if err := graphStore.UpsertNoteMeta(ctx, graph.NoteMeta{
+				ID:         note.ID,
+				Title:      workspace.TitleFromID(note.ID),
+				Path:       string(note.Path),
+				ModifiedAt: note.ModifiedAt,
+				Favorite:   favorite,
+			}); err != nil {
+				return NoteDTO{}, projectionUpdateErr(err)
+			}
+		}
+	}
+	dto := noteDTO(note)
+	s.emit("note:updated", dto)
+	s.emit("graph:updated", map[string]any{"changed": []string{dto.ID}})
+	s.markDirty(note.ID)
 	return dto, nil
 }
 
@@ -886,13 +954,21 @@ func (s *Service) Search(ctx context.Context, input SearchQueryDTO) ([]SearchRes
 	if err != nil {
 		return nil, err
 	}
-	results, err := searchIndex.Search(ctx, domain.SearchQuery{Text: input.Text, Tags: tags(input.Tags), PathPrefix: input.PathPrefix, Limit: input.Limit})
+	results, err := searchIndex.Search(ctx, domain.SearchQuery{Text: input.Text, Tags: tags(input.Tags), PathPrefix: input.PathPrefix, FavoritesOnly: input.FavoritesOnly, Limit: input.Limit})
 	if err != nil {
 		return nil, appErr("search.failed", "Search failed", err)
 	}
+	for i := range results {
+		if results[i].Favorite {
+			results[i].Score *= 1.08
+		}
+	}
+	sort.SliceStable(results, func(i, j int) bool {
+		return results[i].Score > results[j].Score
+	})
 	out := make([]SearchResultDTO, len(results))
 	for i, result := range results {
-		out[i] = SearchResultDTO{ID: string(result.ID), Path: string(result.Path), Title: result.Title, Score: result.Score, Fragments: result.Fragments}
+		out[i] = SearchResultDTO{ID: string(result.ID), Path: string(result.Path), Title: result.Title, Score: result.Score, Fragments: result.Fragments, Favorite: result.Favorite}
 	}
 	return out, nil
 }
@@ -902,7 +978,7 @@ func (s *Service) FullGraph(ctx context.Context, input GraphFilterDTO) (GraphDTO
 	if err != nil {
 		return GraphDTO{}, err
 	}
-	g, err := graphStore.FullGraph(ctx, domain.GraphFilter{Tags: tags(input.Tags), PathPrefix: input.PathPrefix, IncludeUnresolved: input.IncludeUnresolved, IncludeSoftLinks: input.IncludeSoftLinks, IncludeMetadataLinks: input.IncludeMetadataLinks})
+	g, err := graphStore.FullGraph(ctx, domain.GraphFilter{Tags: tags(input.Tags), PathPrefix: input.PathPrefix, FavoritesOnly: input.FavoritesOnly, IncludeUnresolved: input.IncludeUnresolved, IncludeSoftLinks: input.IncludeSoftLinks, IncludeMetadataLinks: input.IncludeMetadataLinks})
 	if err != nil {
 		return GraphDTO{}, appErr("graph.failed", "Could not load graph", err)
 	}
@@ -940,6 +1016,7 @@ func (s *Service) GraphQuery(ctx context.Context, input GraphQueryDTO) (GraphDTO
 		Types:                input.Types,
 		Tags:                 tags(input.Tags),
 		PathPrefix:           input.PathPrefix,
+		FavoritesOnly:        input.FavoritesOnly,
 		IncludeSoftLinks:     input.IncludeSoftLinks,
 		IncludeMetadataLinks: input.IncludeMetadataLinks,
 		IncludeUnresolved:    input.IncludeUnresolved,
@@ -1669,6 +1746,7 @@ func defaultSettings() Settings {
 			DefaultMode:  "2d",
 			DefaultDepth: 2,
 		},
+		Workspaces: map[string]WorkspaceSettings{},
 	}
 }
 
@@ -1692,7 +1770,91 @@ func normalizeSettings(settings Settings) Settings {
 	if settings.GraphView.DefaultDepth > 4 {
 		settings.GraphView.DefaultDepth = 4
 	}
+	if settings.Workspaces == nil {
+		settings.Workspaces = map[string]WorkspaceSettings{}
+	}
+	for path, workspaceSettings := range settings.Workspaces {
+		trimmedPath := strings.TrimSpace(path)
+		if trimmedPath == "" {
+			delete(settings.Workspaces, path)
+			continue
+		}
+		normalizedWorkspaceSettings := normalizeWorkspaceSettings(workspaceSettings)
+		if trimmedPath != path {
+			delete(settings.Workspaces, path)
+		}
+		settings.Workspaces[trimmedPath] = normalizedWorkspaceSettings
+	}
 	return settings
+}
+
+func normalizeWorkspaceSettings(settings WorkspaceSettings) WorkspaceSettings {
+	defaults := defaultWorkspaceSettings()
+	settings.DefaultType = strings.TrimSpace(settings.DefaultType)
+	if settings.DefaultType == "" {
+		settings.DefaultType = defaults.DefaultType
+	}
+	settings.EnabledTypes = normalizeTypeList(settings.EnabledTypes)
+	if len(settings.EnabledTypes) == 0 {
+		settings.EnabledTypes = defaults.EnabledTypes
+	}
+	if !containsString(settings.EnabledTypes, settings.DefaultType) {
+		settings.EnabledTypes = append([]string{settings.DefaultType}, settings.EnabledTypes...)
+	}
+	if settings.AccessMode != "readOnlyLocal" && settings.AccessMode != "readOnlyGit" && settings.AccessMode != "editable" {
+		settings.AccessMode = defaults.AccessMode
+	}
+	settings.GitURL = strings.TrimSpace(settings.GitURL)
+	if settings.AccessMode != "readOnlyGit" {
+		settings.GitURL = ""
+	}
+	return settings
+}
+
+func defaultWorkspaceSettings() WorkspaceSettings {
+	return WorkspaceSettings{
+		DefaultType: "concept",
+		EnabledTypes: []string{
+			"concept",
+			"adr",
+			"service",
+			"entity",
+			"how-to",
+			"recipe",
+			"gotcha",
+			"convention",
+			"plan",
+			"progress",
+			"meeting",
+		},
+		AccessMode: "editable",
+	}
+}
+
+func normalizeTypeList(values []string) []string {
+	out := make([]string, 0, len(values))
+	seen := map[string]struct{}{}
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		out = append(out, value)
+	}
+	return out
+}
+
+func containsString(values []string, target string) bool {
+	for _, value := range values {
+		if value == target {
+			return true
+		}
+	}
+	return false
 }
 func (s *Service) repairWorkspaceProjections(ctx context.Context, root string, reason string, cause error) error {
 	if reason == "" {
@@ -2159,7 +2321,7 @@ func updateIncrementalProjections(ctx context.Context, repo *workspace.FileNoteR
 			if err := graphStore.ReplaceMetadataLinks(ctx, parsed.ID, graph.MetadataMemberships(parsed)); err != nil {
 				return err
 			}
-			if err := graphStore.UpsertNoteMeta(ctx, noteMetaFor(parsed.ID, string(parsed.ID)+".md", parsed.Metadata.Type, parsed.ModifiedAt, parsed.Tags)); err != nil {
+			if err := graphStore.UpsertNoteMeta(ctx, noteMetaFor(parsed.ID, string(parsed.ID)+".md", parsed.Metadata.Type, parsed.ModifiedAt, parsed.Tags, parsed.Metadata.Favorite)); err != nil {
 				return err
 			}
 			if err := searchIndex.Index(ctx, domain.SearchDocumentFromParsed(parsed, domain.NotePath(string(parsed.ID)+".md"))); err != nil {
@@ -2209,7 +2371,7 @@ func updateOneProjectionFast(ctx context.Context, repo *workspace.FileNoteReposi
 	if err := graphStore.ReplaceMetadataLinks(ctx, parsed.ID, graph.MetadataMemberships(parsed)); err != nil {
 		return err
 	}
-	return graphStore.UpsertNoteMeta(ctx, noteMetaFor(parsed.ID, string(note.Path), parsed.Metadata.Type, note.ModifiedAt, parsed.Tags))
+	return graphStore.UpsertNoteMeta(ctx, noteMetaFor(parsed.ID, string(note.Path), parsed.Metadata.Type, note.ModifiedAt, parsed.Tags, parsed.Metadata.Favorite))
 }
 
 // resolverIDs returns the note ID set for link resolution. When the in-memory
@@ -2259,7 +2421,7 @@ func updateOneProjection(ctx context.Context, repo *workspace.FileNoteRepository
 	if err := graphStore.ReplaceMetadataLinks(ctx, parsed.ID, graph.MetadataMemberships(parsed)); err != nil {
 		return err
 	}
-	if err := graphStore.UpsertNoteMeta(ctx, noteMetaFor(parsed.ID, string(note.Path), parsed.Metadata.Type, note.ModifiedAt, parsed.Tags)); err != nil {
+	if err := graphStore.UpsertNoteMeta(ctx, noteMetaFor(parsed.ID, string(note.Path), parsed.Metadata.Type, note.ModifiedAt, parsed.Tags, parsed.Metadata.Favorite)); err != nil {
 		return err
 	}
 	inference := graph.NewLocalInferenceService(graph.InferenceConfig{})
@@ -2360,7 +2522,7 @@ func noteSummaryDTO(note domain.NoteSummary) NoteSummaryDTO {
 	for i, tag := range note.Tags {
 		tags[i] = string(tag)
 	}
-	return NoteSummaryDTO{ID: string(note.ID), Title: note.Title, Path: string(note.Path), Type: note.Type, Tags: tags, ModifiedAt: note.ModifiedAt.Format(timeFormat)}
+	return NoteSummaryDTO{ID: string(note.ID), Title: note.Title, Path: string(note.Path), Type: note.Type, Tags: tags, Favorite: note.Favorite, ModifiedAt: note.ModifiedAt.Format(timeFormat)}
 }
 
 func noteRowsToDTOs(rows []graph.NoteRow) []NoteSummaryDTO {
@@ -2376,17 +2538,91 @@ func noteRowToDTO(row graph.NoteRow) NoteSummaryDTO {
 	if tags == nil {
 		tags = []string{}
 	}
-	return NoteSummaryDTO{ID: row.ID, Title: row.Title, Path: row.Path, Type: row.Type, Tags: tags, ModifiedAt: row.ModifiedAt}
+	return NoteSummaryDTO{ID: row.ID, Title: row.Title, Path: row.Path, Type: row.Type, Tags: tags, Favorite: row.Favorite, ModifiedAt: row.ModifiedAt}
 }
 
 // noteMetaFor builds the SQLite note-metadata row for a parsed note. Title uses
 // the filename-derived form (matching the sidebar) for stable link resolution.
-func noteMetaFor(id domain.NoteID, path string, noteType string, modified time.Time, tags []domain.Tag) graph.NoteMeta {
-	return graph.NoteMeta{ID: id, Title: workspace.TitleFromID(id), Path: path, Type: noteType, ModifiedAt: modified, Tags: tags}
+func noteMetaFor(id domain.NoteID, path string, noteType string, modified time.Time, tags []domain.Tag, favorite bool) graph.NoteMeta {
+	return graph.NoteMeta{ID: id, Title: workspace.TitleFromID(id), Path: path, Type: noteType, ModifiedAt: modified, Tags: tags, Favorite: favorite}
 }
 
 func noteDTO(note domain.Note) NoteDTO {
-	return NoteDTO{ID: string(note.ID), Path: string(note.Path), Content: note.Document.Raw, ModifiedAt: note.ModifiedAt.Format(timeFormat), Version: encodeVersion(note.Version)}
+	favorite := favoriteFromRawFrontmatter(note.Document.Raw)
+	return NoteDTO{ID: string(note.ID), Path: string(note.Path), Content: note.Document.Raw, Favorite: favorite, ModifiedAt: note.ModifiedAt.Format(timeFormat), Version: encodeVersion(note.Version)}
+}
+
+func favoriteFromRawFrontmatter(raw string) bool {
+	frontmatter, _, ok := rawFrontmatter(raw)
+	if !ok {
+		return false
+	}
+	for _, line := range strings.Split(frontmatter, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if !strings.HasPrefix(line, "favorite:") {
+			continue
+		}
+		value := strings.TrimSpace(strings.TrimPrefix(trimmed, "favorite:"))
+		value = strings.Trim(value, `"'`)
+		switch strings.ToLower(value) {
+		case "true", "yes", "y", "1", "on":
+			return true
+		default:
+			return false
+		}
+	}
+	return false
+}
+
+func setFavoriteFrontmatter(raw string, favorite bool) (string, bool) {
+	frontmatter, suffix, ok := rawFrontmatter(raw)
+	if !ok {
+		if !favorite {
+			return raw, false
+		}
+		return "---\nfavorite: true\n---\n" + raw, true
+	}
+	lines := strings.Split(frontmatter, "\n")
+	out := make([]string, 0, len(lines)+1)
+	found := false
+	changed := false
+	for _, line := range lines {
+		if strings.HasPrefix(line, "favorite:") {
+			found = true
+			if favorite {
+				if line != "favorite: true" {
+					changed = true
+				}
+				out = append(out, "favorite: true")
+			} else {
+				changed = true
+			}
+			continue
+		}
+		out = append(out, line)
+	}
+	if favorite && !found {
+		out = append(out, "favorite: true")
+		changed = true
+	}
+	if !changed {
+		return raw, false
+	}
+	return "---\n" + strings.Join(out, "\n") + suffix, true
+}
+
+func rawFrontmatter(raw string) (string, string, bool) {
+	normalized := strings.ReplaceAll(raw, "\r\n", "\n")
+	normalized = strings.ReplaceAll(normalized, "\r", "\n")
+	if !strings.HasPrefix(normalized, "---\n") {
+		return "", "", false
+	}
+	end := strings.Index(normalized[4:], "\n---")
+	if end < 0 {
+		return "", "", false
+	}
+	end += 4
+	return normalized[4:end], normalized[end:], true
 }
 
 func noteLinkDTO(link domain.NoteLink) NoteLinkDTO {

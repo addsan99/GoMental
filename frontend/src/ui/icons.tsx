@@ -186,6 +186,26 @@ export function ClockIcon({size = 13, className, style}: IconProps) {
   );
 }
 
+export function StarIcon({size = 15, className, style, filled = false}: IconProps & {filled?: boolean}) {
+  return (
+    <svg
+      {...base(size)}
+      stroke="currentColor"
+      strokeWidth={filled ? 1.6 : 2}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={className}
+      style={style}
+      aria-hidden="true"
+    >
+      <path
+        fill={filled ? 'currentColor' : 'none'}
+        d="m12 3 2.8 5.7 6.2.9-4.5 4.4 1.1 6.2L12 17.3l-5.6 2.9 1.1-6.2L3 9.6l6.2-.9z"
+      />
+    </svg>
+  );
+}
+
 export function CodeIcon({size = 15, className, style}: IconProps) {
   return (
     <svg {...base(size)} stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" className={className} style={style} aria-hidden="true">

@@ -298,6 +298,13 @@ func (a *App) SaveNote(req application.SaveNoteRequest) (application.NoteDTO, er
 	return a.service().SaveNote(a.context(), req)
 }
 
+func (a *App) SetNoteFavorite(id string, favorite bool) (application.NoteDTO, error) {
+	if a.writesBlocked() {
+		return application.NoteDTO{}, errReadOnly
+	}
+	return a.service().SetNoteFavorite(a.context(), id, favorite)
+}
+
 func (a *App) ImportURL(req application.ImportURLRequest) (application.NoteDTO, error) {
 	if a.writesBlocked() {
 		return application.NoteDTO{}, errReadOnly

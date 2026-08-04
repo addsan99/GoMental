@@ -25,7 +25,7 @@ import {
   SelectWorkspaceDirectory,
 } from '../../wailsjs/go/main/App'
 import {EventsOn} from '../../wailsjs/runtime/runtime'
-import type {GitSyncResult, GoMentalSettings, MoveNoteRequest, NoteDTOWithVersion, SaveNoteRequestWithVersion} from './types'
+import type {GitSyncResult, GoMentalSettings, MoveNoteRequest, NoteDTOWithVersion, SaveNoteRequestWithVersion, SetNoteFavoriteRequest} from './types'
 
 export {
   Backlinks,
@@ -59,6 +59,14 @@ export function ReadNote(id: string): Promise<NoteDTOWithVersion> {
 
 export function SaveNote(req: SaveNoteRequestWithVersion): Promise<NoteDTOWithVersion> {
   return SaveNoteBinding(req)
+}
+
+export function SetNoteFavorite(req: SetNoteFavoriteRequest): Promise<NoteDTOWithVersion> {
+  const app = (window as any)?.go?.main?.App
+  if (!app || typeof app.SetNoteFavorite !== 'function') {
+    return Promise.reject(new Error('favorites are not available in this build'))
+  }
+  return app.SetNoteFavorite(req.id, req.favorite)
 }
 
 export function MoveNote(req: MoveNoteRequest): Promise<NoteDTOWithVersion> {

@@ -9,6 +9,7 @@ export interface FacetFilter {
   types: string[]
   tags: string[]
   folders: string[]
+  favorites: boolean
 }
 
 export interface GraphViewState {

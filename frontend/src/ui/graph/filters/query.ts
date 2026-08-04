@@ -9,23 +9,24 @@ export function toGraphQueryDTO(state: GraphViewState): application.GraphQueryDT
   const folders = state.facets.folders
   const pathPrefix = folders.length === 1 ? folders[0] : ''
 
-  return application.GraphQueryDTO.createFrom({
+  return {
     seed: state.seed ?? '',
     depth: state.depth,
     types: state.facets.types,
     tags: state.facets.tags,
     pathPrefix,
+    favoritesOnly: state.facets.favorites,
     includeSoftLinks: state.includeSoftLinks,
     includeMetadataLinks: state.includeMetadataLinks,
     includeUnresolved: state.includeUnresolved,
-  })
+  } as application.GraphQueryDTO
 }
 
 export function defaultGraphViewState(): GraphViewState {
   return {
     seed: undefined,
     depth: 2,
-    facets: {types: [], tags: [], folders: []},
+    facets: {types: [], tags: [], folders: [], favorites: false},
     includeSoftLinks: true,
     includeMetadataLinks: true,
     includeUnresolved: false,

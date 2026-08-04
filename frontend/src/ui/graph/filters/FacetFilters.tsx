@@ -7,6 +7,7 @@ import type {CSSProperties} from 'react'
 import type {FacetFilter} from './types'
 
 type FacetAxis = keyof FacetFilter
+type ListFacetAxis = Exclude<FacetAxis, 'favorites'>
 
 // A selectable facet value plus the number of notes carrying it (for ranking and
 // the count badge).
@@ -49,14 +50,14 @@ function toggleMembership(list: string[], value: string): string[] {
 export function FacetFilters(props: FacetFiltersProps) {
   const {available, facets, matchCount, totalCount, onChange} = props
   // Per-axis expand + search state so each facet group manages its own long tail.
-  const [expanded, setExpanded] = useState<Record<FacetAxis, boolean>>({types: false, tags: false, folders: false})
-  const [queries, setQueries] = useState<Record<FacetAxis, string>>({types: '', tags: '', folders: ''})
+  const [expanded, setExpanded] = useState<Record<ListFacetAxis, boolean>>({types: false, tags: false, folders: false})
+  const [queries, setQueries] = useState<Record<ListFacetAxis, string>>({types: '', tags: '', folders: ''})
 
-  const toggleFacet = (axis: FacetAxis, value: string) => {
+  const toggleFacet = (axis: ListFacetAxis, value: string) => {
     onChange({...facets, [axis]: toggleMembership(facets[axis], value)})
   }
 
-  const renderFacetGroup = (axis: FacetAxis, label: string, options: FacetOption[]) => {
+  const renderFacetGroup = (axis: ListFacetAxis, label: string, options: FacetOption[]) => {
     if (options.length === 0) return null
     const selected = facets[axis]
     const isExpanded = expanded[axis]
@@ -132,13 +133,24 @@ export function FacetFilters(props: FacetFiltersProps) {
     )
   }
 
-  const hasAny = available.types.length > 0 || available.tags.length > 0 || available.folders.length > 0
+  const hasAny = available.types.length > 0 || available.tags.length > 0 || available.folders.length > 0 || totalCount > 0
   if (!hasAny) {
     return <div className="gm-rail-empty">No facets in this workspace.</div>
   }
 
   return (
     <div className="gm-facet-filters">
+      <div className="gm-graph-opt">
+        <span className="gm-graph-opt-label">Favorites</span>
+        <label className="gm-graph-check">
+          <input
+            type="checkbox"
+            checked={facets.favorites}
+            onChange={() => onChange({...facets, favorites: !facets.favorites})}
+          />
+          Starred notes
+        </label>
+      </div>
       {renderFacetGroup('types', 'Types', available.types)}
       {renderFacetGroup('tags', 'Tags', available.tags)}
       {renderFacetGroup('folders', 'Folders', available.folders)}

@@ -3,15 +3,22 @@ package main
 import (
 	"context"
 	"embed"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
 	"io"
 	"io/fs"
 	"log"
+	"net/http"
+	"net/url"
 	"os"
 	"os/signal"
+	"path"
+	"path/filepath"
+	"strings"
 	"syscall"
+	"time"
 
 	"GoMental/internal/agentapi/mcp"
 	"GoMental/internal/apphost"
@@ -135,6 +142,10 @@ MCP  (gomental mcp --flags):
 
 SERVE  (gomental serve --flags):
     --workspace <path>   OKF workspace to serve (or GOMENTAL_WORKSPACE).
+    --workspace-url-paths
+                         Treat --workspace as a parent directory and serve each
+                         child workspace at /<workspace-name>. Duplicate child
+                         names are exposed as name(1), name(2), ...
     --addr <addr>        Listen address (default :8080 / $GOMENTAL_ADDR).
     --auth <mode>        Auth mode: trustall (default; LAN / behind a proxy).
     --tls-cert <file>    TLS certificate (enables HTTPS with --tls-key).
@@ -293,6 +304,7 @@ func runServe(args []string) error {
 	configFile := fset.String("config", "", "path to a JSON config file (lowest precedence)")
 	addr := fset.String("addr", "", "listen address (default :8080 / $GOMENTAL_ADDR)")
 	workspace := fset.String("workspace", "", "path to the OKF workspace to serve (or $GOMENTAL_WORKSPACE)")
+	workspaceURLPaths := fset.Bool("workspace-url-paths", false, "serve child workspaces selected by URL path under --workspace")
 	authMode := fset.String("auth", "", "auth mode: trustall (default; LAN-trusted / behind a reverse proxy)")
 	tlsCert := fset.String("tls-cert", "", "TLS certificate file (enables HTTPS with --tls-key)")
 	tlsKey := fset.String("tls-key", "", "TLS private key file (enables HTTPS with --tls-cert)")
@@ -330,8 +342,14 @@ func runServe(args []string) error {
 	if err != nil {
 		return err
 	}
+	if *workspaceURLPaths && cfg.GitEnabled() {
+		return fmt.Errorf("--workspace-url-paths cannot be combined with --git-remote")
+	}
 
 	logger := log.New(os.Stderr, "[gomental] ", log.LstdFlags|log.LUTC)
+	if *workspaceURLPaths {
+		return runServeWorkspaceURLPaths(cfg, logger)
+	}
 
 	host, err := apphost.NewHost(apphost.Config{Environment: apphost.Headless()})
 	if err != nil {
@@ -419,6 +437,229 @@ func runServe(args []string) error {
 	}
 	server := httpapi.NewServer(opts)
 	return server.ListenAndServe(ctx)
+}
+
+type servedWorkspace struct {
+	Slug   string
+	Root   string
+	Server *httpapi.Server
+}
+
+// runServeWorkspaceURLPaths serves one apphost per child directory of
+// cfg.WorkspaceRoot. Each child is selected by the first URL path segment.
+func runServeWorkspaceURLPaths(cfg serverconfig.Config, logger *log.Logger) error {
+	children, err := discoverWorkspaceChildren(cfg.WorkspaceRoot)
+	if err != nil {
+		return err
+	}
+	if len(children) == 0 {
+		children = []string{cfg.WorkspaceRoot}
+	}
+
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	served := make([]servedWorkspace, 0, len(children))
+	slugs := uniqueWorkspaceSlugs(children)
+	for i, root := range children {
+		host, err := apphost.NewHost(apphost.Config{Environment: apphost.Headless()})
+		if err != nil {
+			return fmt.Errorf("create host for %s: %w", root, err)
+		}
+		defer func() { _ = host.Close() }()
+
+		keyStore, err := auth.OpenAPIKeyStore(auth.DefaultAPIKeyPath(root))
+		if err != nil {
+			return fmt.Errorf("open api key store for %s: %w", root, err)
+		}
+		auditLog, err := auth.OpenAuditLog(auth.DefaultAuditPath(root))
+		if err != nil {
+			return fmt.Errorf("open audit log for %s: %w", root, err)
+		}
+		if _, err := host.OpenWorkspace(ctx, root); err != nil {
+			return fmt.Errorf("open workspace %s: %w", root, err)
+		}
+
+		workspaceCfg := cfg
+		workspaceCfg.WorkspaceRoot = root
+		authenticator := auth.BearerAuthenticator{Store: keyStore, Fallback: auth.LocalActor, RequireKey: false}
+		server := httpapi.NewServer(httpapi.Options{
+			Host:           host,
+			Config:         workspaceCfg,
+			StaticFS:       spaAssets(),
+			Logger:         logger,
+			Auth:           authenticator,
+			Audit:          auditLog,
+			KeyStore:       keyStore,
+			RequestRate:    cfg.RequestRate,
+			WriteRate:      cfg.WriteRate,
+			AllowedOrigins: cfg.AllowedOrigins,
+			TLSEnabled:     cfg.TLSEnabled(),
+			ReadOnly:       cfg.ReadOnly,
+		})
+		served = append(served, servedWorkspace{
+			Slug:   slugs[i],
+			Root:   root,
+			Server: server,
+		})
+	}
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /api/healthz", func(w http.ResponseWriter, r *http.Request) {
+		writeServerJSON(w, http.StatusOK, map[string]any{"status": "ok", "workspaces": len(served)})
+	})
+	mux.HandleFunc("GET /", func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		_, _ = io.WriteString(w, "<!doctype html><title>GoMental workspaces</title><h1>GoMental workspaces</h1><ul>")
+		for _, ws := range served {
+			_, _ = fmt.Fprintf(w, `<li><a href="/%s/">%s</a></li>`, pathEscape(ws.Slug), ws.Slug)
+		}
+		_, _ = io.WriteString(w, "</ul>")
+	})
+	for _, ws := range served {
+		prefix := "/" + ws.Slug
+		handler := stripWorkspacePrefix(prefix, ws.Server.Handler())
+		mux.HandleFunc(prefix, func(w http.ResponseWriter, r *http.Request) {
+			http.Redirect(w, r, r.URL.Path+"/", http.StatusMovedPermanently)
+		})
+		mux.Handle(prefix+"/", handler)
+		logger.Printf("workspace URL path /%s -> %s", ws.Slug, ws.Root)
+	}
+
+	return listenAndServeHandler(ctx, cfg, logger, mux, fmt.Sprintf("%d workspaces under %s", len(served), cfg.WorkspaceRoot))
+}
+
+func discoverWorkspaceChildren(root string) ([]string, error) {
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		return nil, fmt.Errorf("list workspace parent %s: %w", root, err)
+	}
+	var directDirs []string
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		name := entry.Name()
+		if name == ".workspace" {
+			continue
+		}
+		directDirs = append(directDirs, filepath.Join(root, name))
+	}
+	var candidates []string
+	for _, dir := range directDirs {
+		if err := collectWorkspaceCandidates(dir, &candidates); err != nil {
+			return nil, err
+		}
+	}
+	if len(candidates) > 0 {
+		return candidates, nil
+	}
+	return directDirs, nil
+}
+
+func collectWorkspaceCandidates(dir string, candidates *[]string) error {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return fmt.Errorf("list workspace candidate %s: %w", dir, err)
+	}
+	for _, entry := range entries {
+		if entry.IsDir() && entry.Name() == ".workspace" {
+			*candidates = append(*candidates, dir)
+			return nil
+		}
+		if !entry.IsDir() && strings.EqualFold(filepath.Ext(entry.Name()), ".md") {
+			*candidates = append(*candidates, dir)
+			return nil
+		}
+	}
+	for _, entry := range entries {
+		if !entry.IsDir() || entry.Name() == ".workspace" {
+			continue
+		}
+		if err := collectWorkspaceCandidates(filepath.Join(dir, entry.Name()), candidates); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func uniqueWorkspaceSlugs(roots []string) []string {
+	counts := map[string]int{}
+	slugs := make([]string, len(roots))
+	for i, root := range roots {
+		base := filepath.Base(root)
+		n := counts[base]
+		counts[base] = n + 1
+		if n == 0 {
+			slugs[i] = base
+		} else {
+			slugs[i] = fmt.Sprintf("%s(%d)", base, n)
+		}
+	}
+	return slugs
+}
+
+func stripWorkspacePrefix(prefix string, next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		r2 := r.Clone(r.Context())
+		p := strings.TrimPrefix(r.URL.Path, prefix)
+		if p == "" {
+			p = "/"
+		}
+		r2.URL.Path = p
+		r2.URL.RawPath = ""
+		next.ServeHTTP(w, r2)
+	})
+}
+
+func listenAndServeHandler(ctx context.Context, cfg serverconfig.Config, logger *log.Logger, handler http.Handler, label string) error {
+	srv := &http.Server{
+		Addr:              cfg.Addr,
+		Handler:           handler,
+		ReadHeaderTimeout: 10 * time.Second,
+		IdleTimeout:       120 * time.Second,
+	}
+	errCh := make(chan error, 1)
+	go func() {
+		scheme := "http"
+		if cfg.TLSEnabled() {
+			scheme = "https"
+		}
+		logger.Printf("gomental serve listening on %s://%s (%s)", scheme, cfg.Addr, label)
+		var err error
+		if cfg.TLSEnabled() {
+			err = srv.ListenAndServeTLS(cfg.TLSCertFile, cfg.TLSKeyFile)
+		} else {
+			err = srv.ListenAndServe()
+		}
+		if err != nil && !errors.Is(err, http.ErrServerClosed) {
+			errCh <- err
+			return
+		}
+		errCh <- nil
+	}()
+	select {
+	case <-ctx.Done():
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		return srv.Shutdown(shutdownCtx)
+	case err := <-errCh:
+		return err
+	}
+}
+
+func pathEscape(s string) string {
+	return url.PathEscape(path.Clean("/" + s)[1:])
+}
+
+func writeServerJSON(w http.ResponseWriter, status int, value any) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(value)
 }
 
 // runMCP runs a stdio MCP server for local coding agents, reusing an in-process

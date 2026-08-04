@@ -261,7 +261,7 @@ export function GraphView3D({
   // their metadata; hub nodes are always contextual (never dimmed by facets).
   const passesFacets = useCallback((node: FGNode): boolean => {
     const facets = viewStateRef.current.facets;
-    if (facets.types.length === 0 && facets.tags.length === 0 && facets.folders.length === 0) {
+    if (facets.types.length === 0 && facets.tags.length === 0 && facets.folders.length === 0 && !facets.favorites) {
       return true;
     }
     if (HUB_NODE_KINDS.has(node.kind)) {
@@ -278,6 +278,9 @@ export function GraphView3D({
       return false;
     }
     if (facets.folders.length && !facets.folders.some((folder) => folderOf(note.path) === folder)) {
+      return false;
+    }
+    if (facets.favorites && !note.favorite) {
       return false;
     }
     return true;
@@ -450,6 +453,7 @@ export function GraphView3D({
         types: viewState.facets.types,
         tags: viewState.facets.tags,
         folders: viewState.facets.folders,
+        favorites: viewState.facets.favorites,
         unresolved: viewState.includeUnresolved,
         soft: linkTypes.soft,
         meta: linkTypes.metadata,
@@ -1132,7 +1136,7 @@ export function GraphView3D({
     let total = 0;
     let match = 0;
     const facets = viewState.facets;
-    const anyFacet = facets.types.length > 0 || facets.tags.length > 0 || facets.folders.length > 0;
+    const anyFacet = facets.types.length > 0 || facets.tags.length > 0 || facets.folders.length > 0 || facets.favorites;
     for (const node of data.nodes) {
       if (HUB_NODE_KINDS.has(node.kind) || node.kind === 'unresolved') {
         continue;
