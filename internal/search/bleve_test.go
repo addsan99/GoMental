@@ -47,6 +47,58 @@ func TestBleveIndexFiltersByTagAndPath(t *testing.T) {
 	}
 }
 
+func TestBleveIndexSearchesNoteIDAndFilename(t *testing.T) {
+	idx := openTestIndex(t)
+	ctx := context.Background()
+	indexDocs(t, idx,
+		doc("ramen soup #1", "ramen soup #1.md", "Soup Draft", "Cook the noodles according to the package instructions.", nil),
+		doc("recipes/homemade-ramen", "recipes/homemade-ramen.md", "Homemade", "savory noodles", nil),
+		doc("salmon", "salmon.md", "Salmon", "fish", nil),
+	)
+	results, err := idx.Search(ctx, domain.SearchQuery{Text: "ramen", Limit: 10})
+	if err != nil {
+		t.Fatalf("search: %v", err)
+	}
+	got := map[domain.NoteID]bool{}
+	for _, result := range results {
+		got[result.ID] = true
+	}
+	for _, want := range []domain.NoteID{"ramen soup #1", "recipes/homemade-ramen"} {
+		if !got[want] {
+			t.Fatalf("expected %s to match by id/path, got %#v", want, results)
+		}
+	}
+	if got["salmon"] {
+		t.Fatalf("unexpected non-matching result: %#v", results)
+	}
+}
+
+func TestBleveIndexSearchesBodyRecipeInstructions(t *testing.T) {
+	idx := openTestIndex(t)
+	ctx := context.Background()
+	indexDocs(t, idx,
+		doc("soup-one", "soup-one.md", "Soup One", "Cook the ramen noodles according to the package instructions.", nil),
+		doc("soup-two", "soup-two.md", "Soup Two", "Bring the soup to a rapid boil, add the Ramen, and cook for 1 minute.", nil),
+		doc("salmon", "salmon.md", "Salmon", "Bake until flaky.", nil),
+	)
+	results, err := idx.Search(ctx, domain.SearchQuery{Text: "ramen", Limit: 10})
+	if err != nil {
+		t.Fatalf("search: %v", err)
+	}
+	got := map[domain.NoteID]bool{}
+	for _, result := range results {
+		got[result.ID] = true
+	}
+	for _, want := range []domain.NoteID{"soup-one", "soup-two"} {
+		if !got[want] {
+			t.Fatalf("expected body match %s, got %#v", want, results)
+		}
+	}
+	if got["salmon"] {
+		t.Fatalf("unexpected non-matching result: %#v", results)
+	}
+}
+
 func TestBleveIndexDeleteAndReopen(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "index")
 	idx, err := OpenBleveIndex(path)

@@ -650,20 +650,23 @@ func (s *Service) SetNoteFavorite(ctx context.Context, id string, favorite bool)
 		if err != nil {
 			return NoteDTO{}, appErr("notes.read_failed", "Could not read updated note", err)
 		}
-		if err := updateOneProjectionFast(ctx, repo, searchIndex, graphStore, s.corpusState(), note); err != nil {
-			var decodeErr domain.DecodeError
-			if !errors.As(err, &decodeErr) {
-				return NoteDTO{}, projectionUpdateErr(err)
-			}
-			if err := graphStore.UpsertNoteMeta(ctx, graph.NoteMeta{
-				ID:         note.ID,
-				Title:      workspace.TitleFromID(note.ID),
-				Path:       string(note.Path),
-				ModifiedAt: note.ModifiedAt,
-				Favorite:   favorite,
-			}); err != nil {
-				return NoteDTO{}, projectionUpdateErr(err)
-			}
+	}
+	if err := updateOneProjectionFast(ctx, repo, searchIndex, graphStore, s.corpusState(), note); err != nil {
+		var decodeErr domain.DecodeError
+		if !errors.As(err, &decodeErr) {
+			return NoteDTO{}, projectionUpdateErr(err)
+		}
+		if err := graphStore.UpsertNoteMeta(ctx, graph.NoteMeta{
+			ID:         note.ID,
+			Title:      workspace.TitleFromID(note.ID),
+			Path:       string(note.Path),
+			ModifiedAt: note.ModifiedAt,
+			Favorite:   favorite,
+		}); err != nil {
+			return NoteDTO{}, projectionUpdateErr(err)
+		}
+		if err := searchIndex.Index(ctx, okf.SearchDocumentFromRaw(note.ID, note.Path, note.Document.Raw, note.ModifiedAt)); err != nil {
+			return NoteDTO{}, projectionUpdateErr(err)
 		}
 	}
 	dto := noteDTO(note)
@@ -1944,6 +1947,9 @@ func projectionHealth(ctx context.Context, ws workspace.Workspace, notes []domai
 	if state.TotalNotes != len(notes) || state.ParsedNotes > state.TotalNotes {
 		return ErrProjectionStale, nil
 	}
+	if state.SearchSchemaVersion != search.SearchSchemaVersion {
+		return ErrProjectionStale, nil
+	}
 	for _, note := range notes {
 		if note.ModifiedAt.After(state.CompletedAt) {
 			return ErrProjectionStale, nil
@@ -2331,10 +2337,34 @@ func updateIncrementalProjections(ctx context.Context, repo *workspace.FileNoteR
 		changedSet[id] = struct{}{}
 		_, ok := parsedByID[id]
 		if !ok {
-			if err := searchIndex.Delete(ctx, id); err != nil {
+			note, err := repo.Read(ctx, id)
+			if err != nil {
+				if err := searchIndex.Delete(ctx, id); err != nil {
+					return err
+				}
+				if err := graphStore.DeleteNote(ctx, id); err != nil {
+					return err
+				}
+				continue
+			}
+			doc := okf.SearchDocumentFromRaw(note.ID, note.Path, note.Document.Raw, note.ModifiedAt)
+			if err := searchIndex.Index(ctx, doc); err != nil {
 				return err
 			}
-			if err := graphStore.DeleteNote(ctx, id); err != nil {
+			if err := graphStore.ReplaceOutgoingLinks(ctx, note.ID, nil); err != nil {
+				return err
+			}
+			if err := graphStore.ReplaceMetadataLinks(ctx, note.ID, nil); err != nil {
+				return err
+			}
+			if err := graphStore.UpsertNoteMeta(ctx, graph.NoteMeta{
+				ID:         note.ID,
+				Title:      workspace.TitleFromID(note.ID),
+				Path:       string(note.Path),
+				ModifiedAt: note.ModifiedAt,
+				Tags:       doc.Tags,
+				Favorite:   doc.Favorite,
+			}); err != nil {
 				return err
 			}
 		}

@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -208,5 +209,67 @@ func TestViewerEndToEndClone(t *testing.T) {
 	info := app.Info()
 	if info.Git == nil || info.Git.Commit == "" {
 		t.Fatalf("Info().git should report a commit after clone, got %#v", info.Git)
+	}
+}
+
+func TestWritableGitSetFavoriteUpdatesProjectionsAndPushes(t *testing.T) {
+	bare := makeBareRemote(t)
+	cloneTarget := filepath.Join(t.TempDir(), "working-copy")
+	t.Setenv("APPDATA", filepath.Join(t.TempDir(), "appdata"))
+
+	app := NewApp()
+	app.ctx = context.Background()
+	t.Cleanup(func() {
+		app.mu.Lock()
+		host := app.host
+		app.mu.Unlock()
+		if host != nil {
+			_ = host.Close()
+		}
+	})
+
+	settings, err := app.LoadSettings()
+	if err != nil {
+		t.Fatalf("load settings: %v", err)
+	}
+	settings.Workspaces[cloneTarget] = application.WorkspaceSettings{
+		AccessMode: "writableGit",
+		GitURL:     bare,
+		GitBaseRef: "main",
+		GitBranch:  "gomental/test-machine/wiki",
+	}
+	if err := app.SaveSettings(settings); err != nil {
+		t.Fatalf("save settings: %v", err)
+	}
+	if _, err := app.OpenWorkspace(cloneTarget); err != nil {
+		t.Fatalf("open writable git workspace: %v", err)
+	}
+
+	if _, err := app.SetNoteFavorite("alpha", true); err != nil {
+		t.Fatalf("favorite alpha: %v", err)
+	}
+	notes, err := app.ListNotes()
+	if err != nil {
+		t.Fatalf("list notes: %v", err)
+	}
+	if len(notes) != 1 || !notes[0].Favorite {
+		t.Fatalf("expected alpha favorite in note list, got %#v", notes)
+	}
+	results, err := app.Search(application.SearchQueryDTO{Text: "Alpha", FavoritesOnly: true, Limit: 10})
+	if err != nil {
+		t.Fatalf("favorite search: %v", err)
+	}
+	if len(results) != 1 || results[0].ID != "alpha" || !results[0].Favorite {
+		t.Fatalf("expected alpha favorite search hit, got %#v", results)
+	}
+
+	check := filepath.Join(t.TempDir(), "check")
+	git(t, "", "clone", "--branch", "gomental/test-machine/wiki", bare, check)
+	data, err := os.ReadFile(filepath.Join(check, "alpha.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(strings.ReplaceAll(string(data), "\r\n", "\n"), "favorite: true") {
+		t.Fatalf("pushed alpha.md missing favorite: true:\n%s", data)
 	}
 }

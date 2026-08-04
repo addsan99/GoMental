@@ -57,6 +57,33 @@ func (p Parser) ParseNote(id domain.NoteID, raw string, modifiedAt time.Time) (d
 	}, nil
 }
 
+func SearchDocumentFromRaw(id domain.NoteID, path domain.NotePath, raw string, modifiedAt time.Time) domain.SearchDocument {
+	body := raw
+	metadata := domain.OKFMetadata{}
+	if frontmatter, splitBody, err := splitFrontmatter(raw); err == nil {
+		body = splitBody
+		if parsedMetadata, metaErr := parseMetadata(frontmatter); metaErr == nil {
+			metadata = parsedMetadata
+		}
+	}
+	headings := extractHeadings(body)
+	title := chooseTitle(metadata.Title, headings, id)
+	headingText := make([]string, len(headings))
+	for i, heading := range headings {
+		headingText[i] = heading.Text
+	}
+	return domain.SearchDocument{
+		ID:         id,
+		Path:       path,
+		Title:      title,
+		Body:       plainText(body),
+		Headings:   headingText,
+		Tags:       metadata.Tags,
+		Favorite:   metadata.Favorite,
+		ModifiedAt: modifiedAt.Unix(),
+	}
+}
+
 func splitFrontmatter(raw string) (string, string, error) {
 	normalized := strings.ReplaceAll(raw, "\r\n", "\n")
 	normalized = strings.ReplaceAll(normalized, "\r", "\n")

@@ -3,6 +3,7 @@ package application
 import (
 	"context"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -15,6 +16,7 @@ import (
 
 	"GoMental/internal/domain"
 	"GoMental/internal/graph"
+	"GoMental/internal/indexing"
 	"GoMental/internal/platform"
 	"GoMental/internal/search"
 	"GoMental/internal/workspace"
@@ -223,6 +225,58 @@ func TestSetNoteFavoriteToleratesInvalidOKFMetadata(t *testing.T) {
 				t.Fatalf("expected favorite removed, got %#v", unfavorited)
 			}
 		})
+	}
+}
+
+func TestSetNoteFavoriteRepairsProjectionWhenFileAlreadyMatches(t *testing.T) {
+	root := t.TempDir()
+	writeNote(t, root, "alpha.md", "---\ntype: concept\ntitle: Alpha\nfavorite: true\n---\n\n# Alpha\n")
+	service := testService(t, nil)
+	ctx := context.Background()
+	if _, err := service.OpenWorkspace(ctx, root); err != nil {
+		t.Fatalf("open workspace: %v", err)
+	}
+
+	if err := service.graphStore.UpsertNoteMeta(ctx, graph.NoteMeta{
+		ID:         "alpha",
+		Title:      "alpha",
+		Path:       "alpha.md",
+		Type:       "concept",
+		ModifiedAt: time.Now(),
+		Favorite:   false,
+	}); err != nil {
+		t.Fatalf("stale graph favorite: %v", err)
+	}
+	if err := service.searchIndex.Index(ctx, domain.SearchDocument{
+		ID:       "alpha",
+		Path:     "alpha.md",
+		Title:    "Alpha",
+		Body:     "Alpha",
+		Favorite: false,
+	}); err != nil {
+		t.Fatalf("stale search favorite: %v", err)
+	}
+
+	favorited, err := service.SetNoteFavorite(ctx, "alpha", true)
+	if err != nil {
+		t.Fatalf("favorite alpha: %v", err)
+	}
+	if !favorited.Favorite {
+		t.Fatalf("expected favorite dto, got %#v", favorited)
+	}
+	notes, err := service.ListNotes(ctx)
+	if err != nil {
+		t.Fatalf("list notes: %v", err)
+	}
+	if len(notes) != 1 || !notes[0].Favorite {
+		t.Fatalf("expected repaired favorite in note list, got %#v", notes)
+	}
+	results, err := service.Search(ctx, SearchQueryDTO{Text: "Alpha", FavoritesOnly: true, Limit: 10})
+	if err != nil {
+		t.Fatalf("favorite search: %v", err)
+	}
+	if len(results) != 1 || results[0].ID != "alpha" || !results[0].Favorite {
+		t.Fatalf("expected repaired favorite search hit, got %#v", results)
 	}
 }
 
@@ -600,6 +654,85 @@ func TestServiceOpenWorkspaceRepairsMissingAndCorruptDerivedState(t *testing.T) 
 		t.Fatalf("OKF note content changed during graph repair: %q", got)
 	}
 }
+
+func TestServiceOpenWorkspaceRepairsOldSearchSchema(t *testing.T) {
+	root := t.TempDir()
+	writeNote(t, root, "ramen soup #1.md", "---\ntype: concept\ntitle: Soup Draft\n---\n\n# Soup Draft\nNoodle broth notes.\n")
+	ctx := context.Background()
+
+	service := testService(t, nil)
+	if _, err := service.OpenWorkspace(ctx, root); err != nil {
+		t.Fatalf("open workspace: %v", err)
+	}
+	if err := service.Close(); err != nil {
+		t.Fatalf("close service: %v", err)
+	}
+
+	statePath := filepath.Join(root, ".workspace", "state", "rebuild.json")
+	state, err := indexing.ReadState(statePath)
+	if err != nil {
+		t.Fatalf("read rebuild state: %v", err)
+	}
+	state.SearchSchemaVersion = search.SearchSchemaVersion - 1
+	data, err := json.MarshalIndent(state, "", "  ")
+	if err != nil {
+		t.Fatalf("marshal rebuild state: %v", err)
+	}
+	data = append(data, '\n')
+	if err := os.WriteFile(statePath, data, 0o644); err != nil {
+		t.Fatalf("downgrade rebuild state: %v", err)
+	}
+
+	service = testService(t, nil)
+	if _, err := service.OpenWorkspace(ctx, root); err != nil {
+		t.Fatalf("open with old search schema should repair: %v", err)
+	}
+	assertSearchHit(t, service, "ramen", "ramen soup #1")
+}
+
+func TestSearchIndexesReadableNotesWithMissingType(t *testing.T) {
+	root := t.TempDir()
+	writeNote(t, root, "simple-homemade-ramen-soup.md", `---
+title: Simple Homemade Ramen Soup
+tags:
+  - ramen
+  - soup
+favorite: true
+---
+
+# Simple Homemade Ramen Soup
+
+Cook the ramen noodles according to the package instructions.
+Serve with Japanese cucumber salad and pickled vegetables.
+`)
+	service := testService(t, nil)
+	ctx := context.Background()
+	if _, err := service.OpenWorkspace(ctx, root); err != nil {
+		t.Fatalf("open workspace: %v", err)
+	}
+
+	for _, query := range []SearchQueryDTO{
+		{Text: "cucumber", Limit: 10},
+		{Text: "ramen", Tags: []string{"soup"}, Limit: 10},
+		{Text: "noodles", FavoritesOnly: true, Limit: 10},
+	} {
+		results, err := service.Search(ctx, query)
+		if err != nil {
+			t.Fatalf("search %#v: %v", query, err)
+		}
+		if len(results) != 1 || results[0].ID != "simple-homemade-ramen-soup" || !results[0].Favorite {
+			t.Fatalf("expected malformed note search hit for %#v, got %#v", query, results)
+		}
+	}
+	notes, err := service.ListNotes(ctx)
+	if err != nil {
+		t.Fatalf("list notes: %v", err)
+	}
+	if len(notes) != 1 || !notes[0].Favorite || len(notes[0].Tags) != 2 {
+		t.Fatalf("expected favorite/tags projected for malformed note, got %#v", notes)
+	}
+}
+
 func TestServiceOpenWorkspaceDefersCorpusBuild(t *testing.T) {
 	root := t.TempDir()
 	// alpha's body mentions Beta's title; title-only soft inference should link

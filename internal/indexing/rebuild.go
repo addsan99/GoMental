@@ -51,6 +51,7 @@ type RebuildState struct {
 	StartedAt            time.Time  `json:"startedAt"`
 	CompletedAt          time.Time  `json:"completedAt"`
 	SoftLinksCompletedAt *time.Time `json:"softLinksCompletedAt,omitempty"`
+	SearchSchemaVersion  int        `json:"searchSchemaVersion"`
 	TotalNotes           int        `json:"totalNotes"`
 	ParsedNotes          int        `json:"parsedNotes"`
 	FailedNotes          int        `json:"failedNotes"`
@@ -178,9 +179,17 @@ func (r Rebuilder) RebuildCore(ctx context.Context, root string) (RebuildResult,
 	}
 	defer graphStore.Close()
 
-	docs := make([]domain.SearchDocument, len(parsed))
-	for i, note := range parsed {
-		docs[i] = domain.SearchDocumentFromParsed(note, domain.NotePath(string(note.ID)+".md"))
+	parsedByID := make(map[domain.NoteID]domain.ParsedOKFNote, len(parsed))
+	for _, note := range parsed {
+		parsedByID[note.ID] = note
+	}
+	docs, err := searchDocuments(ctx, repo, summaries, parsedByID)
+	if err != nil {
+		return RebuildResult{}, nil, err
+	}
+	docsByID := make(map[domain.NoteID]domain.SearchDocument, len(docs))
+	for _, doc := range docs {
+		docsByID[doc.ID] = doc
 	}
 	r.report(RebuildProgress{Stage: ProgressIndexing, Total: len(docs), Message: "Rebuilding search index"})
 	if err := searchIndex.Rebuild(ctx, docs); err != nil {
@@ -189,10 +198,6 @@ func (r Rebuilder) RebuildCore(ctx context.Context, root string) (RebuildResult,
 	r.report(RebuildProgress{Stage: ProgressIndexing, Completed: len(docs), Total: len(docs)})
 
 	r.report(RebuildProgress{Stage: ProgressGraph, Total: len(summaries), Message: "Rebuilding graph projection"})
-	parsedByID := make(map[domain.NoteID]domain.ParsedOKFNote, len(parsed))
-	for _, note := range parsed {
-		parsedByID[note.ID] = note
-	}
 	// Project a note-metadata row for every scanned note (including ones that failed
 	// to parse) so the SQLite-backed note list stays complete; attach links and tags
 	// for the ones that parsed.
@@ -211,6 +216,9 @@ func (r Rebuilder) RebuildCore(ctx context.Context, root string) (RebuildResult,
 			projection.Meta.Tags = note.Tags
 			projection.Meta.Type = note.Metadata.Type
 			projection.Meta.Favorite = note.Metadata.Favorite
+		} else if doc, ok := docsByID[summary.ID]; ok {
+			projection.Meta.Tags = doc.Tags
+			projection.Meta.Favorite = doc.Favorite
 		}
 		projections = append(projections, projection)
 		r.report(RebuildProgress{Stage: ProgressGraph, Completed: i + 1, Total: len(summaries), NoteID: summary.ID})
@@ -220,7 +228,7 @@ func (r Rebuilder) RebuildCore(ctx context.Context, root string) (RebuildResult,
 	}
 
 	result := RebuildResult{WorkspaceRoot: ws.Root(), TotalNotes: len(summaries), ParsedNotes: len(parsed), FailedNotes: len(failures), SearchPath: searchPath, GraphPath: graphPath, StatePath: statePath}
-	state := RebuildState{WorkspaceRoot: ws.Root(), StartedAt: startedAt, CompletedAt: r.Now().UTC(), TotalNotes: result.TotalNotes, ParsedNotes: result.ParsedNotes, FailedNotes: result.FailedNotes, SearchPath: searchPath, GraphPath: graphPath}
+	state := RebuildState{WorkspaceRoot: ws.Root(), StartedAt: startedAt, CompletedAt: r.Now().UTC(), SearchSchemaVersion: search.SearchSchemaVersion, TotalNotes: result.TotalNotes, ParsedNotes: result.ParsedNotes, FailedNotes: result.FailedNotes, SearchPath: searchPath, GraphPath: graphPath}
 	if err := writeState(statePath, state); err != nil {
 		return RebuildResult{}, nil, err
 	}
@@ -333,6 +341,25 @@ func (r Rebuilder) parseNotes(ctx context.Context, repo *workspace.FileNoteRepos
 		return nil, nil, err
 	}
 	return parsed, failures, nil
+}
+
+func searchDocuments(ctx context.Context, repo *workspace.FileNoteRepository, summaries []domain.NoteSummary, parsedByID map[domain.NoteID]domain.ParsedOKFNote) ([]domain.SearchDocument, error) {
+	docs := make([]domain.SearchDocument, 0, len(summaries))
+	for _, summary := range summaries {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		if parsed, ok := parsedByID[summary.ID]; ok {
+			docs = append(docs, domain.SearchDocumentFromParsed(parsed, summary.Path))
+			continue
+		}
+		note, err := repo.Read(ctx, summary.ID)
+		if err != nil {
+			return nil, err
+		}
+		docs = append(docs, okf.SearchDocumentFromRaw(note.ID, note.Path, note.Document.Raw, note.ModifiedAt))
+	}
+	return docs, nil
 }
 
 func (r Rebuilder) softLinkProjections(ctx context.Context, parsed []domain.ParsedOKFNote) ([]graph.LinkProjection, error) {
