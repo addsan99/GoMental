@@ -217,6 +217,9 @@ func (m *WritableManager) createOrMergePullRequest(ctx context.Context, title, b
 	if strings.TrimSpace(title) == "" {
 		title = "Update GoMental workspace"
 	}
+	if err := m.pushBranch(ctx); err != nil {
+		return PullRequestResult{}, m.fail(fmt.Errorf("gitsync writable: push branch before pull request: %w", err))
+	}
 	pr, err := m.findOpenPullRequest(ctx, repo)
 	if err != nil {
 		return PullRequestResult{}, m.fail(err)
@@ -252,6 +255,24 @@ func (m *WritableManager) Status() WritableStatus {
 		s.LastPushedAt = &t
 	}
 	return s
+}
+
+func (m *WritableManager) pushBranch(ctx context.Context) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.status.Syncing = true
+	defer func() { m.status.Syncing = false }()
+
+	if _, err := m.cfg.Runner.Run(ctx, m.cfg.Dir, "push", "-u", "origin", m.cfg.Branch); err != nil {
+		m.refreshLocked(ctx)
+		return err
+	}
+	now := m.cfg.Now()
+	m.status.LastPushedAt = &now
+	m.status.LastError = ""
+	m.refreshLocked(ctx)
+	m.notify("git:pushed", map[string]any{"branch": m.cfg.Branch, "commit": m.status.Commit})
+	return nil
 }
 
 func (m *WritableManager) refreshLocked(ctx context.Context) {
@@ -340,7 +361,7 @@ func (m *WritableManager) createPullRequest(ctx context.Context, repo githubRepo
 	payload := map[string]string{
 		"title": title,
 		"body":  body,
-		"head":  m.cfg.Branch,
+		"head":  repo.Owner + ":" + m.cfg.Branch,
 		"base":  m.cfg.BaseRef,
 	}
 	var pr struct {
