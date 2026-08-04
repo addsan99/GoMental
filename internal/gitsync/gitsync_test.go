@@ -2,6 +2,7 @@ package gitsync
 
 import (
 	"context"
+	"encoding/base64"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -51,6 +52,24 @@ func makeRemote(t *testing.T) string {
 
 	bare := filepath.Join(root, "remote.git")
 	git(t, "", "clone", "--bare", "--branch", "main", seed, bare)
+	return bare
+}
+
+func makeRemoteWithBranch(t *testing.T, branch string) string {
+	t.Helper()
+	root := t.TempDir()
+	seed := filepath.Join(root, "seed")
+	if err := os.MkdirAll(seed, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	git(t, seed, "init")
+	git(t, seed, "checkout", "-B", branch)
+	writeFile(t, filepath.Join(seed, "alpha.md"), "# Alpha\n")
+	git(t, seed, "add", "-A")
+	git(t, seed, "commit", "-m", "seed")
+
+	bare := filepath.Join(root, "remote.git")
+	git(t, "", "clone", "--bare", "--branch", branch, seed, bare)
 	return bare
 }
 
@@ -337,6 +356,25 @@ func TestNewValidation(t *testing.T) {
 	}
 	if m.cfg.Runner == nil || m.cfg.Now == nil {
 		t.Fatalf("Runner/Now defaults not applied")
+	}
+}
+
+func TestGitCredentialEnvUsesTemporaryExtraHeader(t *testing.T) {
+	env := gitCredentialEnv(Credential{Username: "alice", Token: "secret-token"})
+	wantHeader := "GIT_CONFIG_VALUE_0=AUTHORIZATION: basic " + base64.StdEncoding.EncodeToString([]byte("alice:secret-token"))
+	if !contains(env, "GIT_CONFIG_COUNT=1") || !contains(env, "GIT_CONFIG_KEY_0=http.https://github.com/.extraheader") || !contains(env, wantHeader) {
+		t.Fatalf("credential env missing expected git config entries: %v", env)
+	}
+	if !contains(env, "GIT_TERMINAL_PROMPT=0") {
+		t.Fatalf("credential env should disable interactive prompts: %v", env)
+	}
+}
+
+func TestGitCredentialEnvDefaultsUsername(t *testing.T) {
+	env := gitCredentialEnv(Credential{Token: "secret-token"})
+	wantHeader := "GIT_CONFIG_VALUE_0=AUTHORIZATION: basic " + base64.StdEncoding.EncodeToString([]byte("x-access-token:secret-token"))
+	if !contains(env, wantHeader) {
+		t.Fatalf("credential env missing default-token username header: %v", env)
 	}
 }
 
