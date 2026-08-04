@@ -6,28 +6,37 @@ GoMental is a local-first desktop note-taking and knowledge graph app written in
 
 Run commands from the project root.
 
+### Windows
+
 ```powershell
-# Install frontend dependencies
 Set-Location frontend
 npm install
 Set-Location ..
 
-# Start the Wails development app
 wails dev
 
-# Typecheck the frontend
-Set-Location frontend
-npm run typecheck
-Set-Location ..
+.\build.cmd
 
-# Build a production desktop executable
-wails build
+go test ./...
+```
 
-# Backend tests
+### macOS / Linux
+
+```sh
+cd frontend
+npm install
+cd ..
+
+wails dev
+
+sh ./build.sh
+
 go test ./...
 ```
 
 ## Build Notes
 
 `wails.json` calls Vite directly with `node node_modules/vite/bin/vite.js build`, and dev mode calls Vite directly with `node node_modules/vite/bin/vite.js`. Keep TypeScript typechecking as a separate command because Phase 0 found npm and batch wrappers can fail with `Access is denied` when Wails captures frontend build output on this Windows setup.
+
+The Windows-only console attachment and pre-render splash live behind `//go:build windows`; macOS and Linux compile the matching `*_other.go` no-op implementations. The repo keeps both `build.cmd` and `build.sh` so local builds do not depend on one platform's shell.
 

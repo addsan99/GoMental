@@ -93,8 +93,10 @@ function GraphPanel({workspaceOpen, selectedID, notes, refreshKey = 0, onSelectN
           : FullGraph({
             pathPrefix: normalizeGraphPath(pathPrefix),
             tags: selectedTags,
+            favoritesOnly: false,
             includeUnresolved,
             includeSoftLinks,
+            includeMetadataLinks: true,
             depth: 0,
           }),
         LoadGraphLayout(),
