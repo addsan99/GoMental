@@ -7,32 +7,6 @@
 // accept/return them so the compiler stays green.
 import type {application, main} from '../../wailsjs/go/models'
 
-declare module '../../wailsjs/go/models' {
-  export namespace application {
-    interface NoteDTO {
-      favorite?: boolean
-    }
-    interface NoteSummaryDTO {
-      favorite?: boolean
-    }
-    interface SearchQueryDTO {
-      favoritesOnly?: boolean
-    }
-    interface SearchResultDTO {
-      favorite?: boolean
-    }
-    interface GraphFilterDTO {
-      favoritesOnly?: boolean
-    }
-    interface GraphQueryDTO {
-      favoritesOnly?: boolean
-    }
-    interface ListNotesQueryDTO {
-      favoritesOnly?: boolean
-    }
-  }
-}
-
 // Git-viewer status surfaced on `/api/info` (and `GET /api/git/status`) when the
 // server tracks a git working copy. Null / absent when git mode is off.
 export type GitStatusInfo = {

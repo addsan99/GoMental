@@ -26,6 +26,14 @@ go version
 where wails
 echo ==========================================================================
 
+go list unsafe >NUL 2>NUL
+if not "%ERRORLEVEL%"=="0" (
+    echo.
+    echo Build FAILED: Go standard library is not usable. Reinstall or repair Go, then retry.
+    popd
+    exit /b 1
+)
+
 wails build %*
 set "BUILD_RC=%ERRORLEVEL%"
 

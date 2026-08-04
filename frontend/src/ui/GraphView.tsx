@@ -779,7 +779,7 @@ export function GraphView({workspaceOpen, selectedID, refreshKey, notes, theme, 
       const [dto, savedLayout] = await Promise.all([
         selectedID
           ? Neighborhood(selectedID, depth)
-          : FullGraph({pathPrefix: '', tags: [], includeUnresolved: false, includeSoftLinks: true, includeMetadataLinks: linkTypes.metadata, depth: 0}),
+          : FullGraph({pathPrefix: '', tags: [], favoritesOnly: false, includeUnresolved: false, includeSoftLinks: true, includeMetadataLinks: linkTypes.metadata, depth: 0}),
         LoadGraphLayout().catch(() => models.LayoutSnapshotDTO.createFrom({coordinates: {}})),
       ]);
       if (requestRef.current !== requestID) {
