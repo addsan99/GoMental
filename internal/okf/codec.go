@@ -45,6 +45,11 @@ func (c Codec) Encode(metadata domain.OKFMetadata, body string) (domain.OKFDocum
 		sort.Strings(tags)
 		frontmatter["tags"] = tags
 	}
+	if metadata.Favorite {
+		frontmatter["favorite"] = true
+	} else {
+		delete(frontmatter, "favorite")
+	}
 	if metadata.Timestamp != nil {
 		frontmatter["timestamp"] = metadata.Timestamp.UTC().Format(time.RFC3339)
 	}

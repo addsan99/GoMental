@@ -176,6 +176,56 @@ func TestServiceListNotesCarriesTypeAndFilters(t *testing.T) {
 	}
 }
 
+func TestSetNoteFavoriteToleratesInvalidOKFMetadata(t *testing.T) {
+	cases := []struct {
+		name    string
+		content string
+	}{
+		{
+			name:    "missing type",
+			content: "---\ntitle: Loose Note\n---\n\n# Loose Note\n",
+		},
+		{
+			name:    "malformed yaml",
+			content: "---\ntitle: [broken\n---\n\n# Broken YAML\n",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			root := t.TempDir()
+			writeNote(t, root, "loose.md", tc.content)
+			service := testService(t, nil)
+			ctx := context.Background()
+			if _, err := service.OpenWorkspace(ctx, root); err != nil {
+				t.Fatalf("open workspace: %v", err)
+			}
+
+			favorited, err := service.SetNoteFavorite(ctx, "loose", true)
+			if err != nil {
+				t.Fatalf("favorite invalid note: %v", err)
+			}
+			if !favorited.Favorite || !strings.Contains(favorited.Content, "favorite: true") {
+				t.Fatalf("expected favorite true in dto/content, got %#v", favorited)
+			}
+			notes, err := service.ListNotes(ctx)
+			if err != nil {
+				t.Fatalf("list notes: %v", err)
+			}
+			if len(notes) != 1 || !notes[0].Favorite {
+				t.Fatalf("expected favorite in note list, got %#v", notes)
+			}
+
+			unfavorited, err := service.SetNoteFavorite(ctx, "loose", false)
+			if err != nil {
+				t.Fatalf("unfavorite invalid note: %v", err)
+			}
+			if unfavorited.Favorite || strings.Contains(unfavorited.Content, "favorite: true") {
+				t.Fatalf("expected favorite removed, got %#v", unfavorited)
+			}
+		})
+	}
+}
+
 func TestServiceRebuildClosesOpenProjectionFiles(t *testing.T) {
 	root := t.TempDir()
 	writeNote(t, root, "alpha.md", "---\ntype: concept\ntitle: Alpha\n---\n\n# Alpha\n")
@@ -343,6 +393,14 @@ func TestServiceSettingsAreAppLevel(t *testing.T) {
 	settings.NoteView.ShowFindBar = false
 	settings.GraphView.DefaultMode = "3d"
 	settings.GraphView.DefaultDepth = 4
+	settings.Workspaces = map[string]WorkspaceSettings{
+		"  C:/Knowledge  ": {
+			DefaultType:  "adr",
+			EnabledTypes: []string{"concept", "adr"},
+			AccessMode:   "readOnlyGit",
+			GitURL:       " https://example.com/wiki.git ",
+		},
+	}
 	if err := service.SaveSettings(ctx, settings); err != nil {
 		t.Fatalf("save settings: %v", err)
 	}
@@ -352,6 +410,13 @@ func TestServiceSettingsAreAppLevel(t *testing.T) {
 	}
 	if loaded.Appearance.Theme != "light" || loaded.NoteView.DefaultEditMode != "source" || loaded.NoteView.ShowFindBar || loaded.GraphView.DefaultMode != "3d" || loaded.GraphView.DefaultDepth != 4 {
 		t.Fatalf("unexpected saved settings: %#v", loaded)
+	}
+	workspaceSettings, ok := loaded.Workspaces["C:/Knowledge"]
+	if !ok {
+		t.Fatalf("expected normalized workspace settings key: %#v", loaded.Workspaces)
+	}
+	if workspaceSettings.DefaultType != "adr" || workspaceSettings.AccessMode != "readOnlyGit" || workspaceSettings.GitURL != "https://example.com/wiki.git" {
+		t.Fatalf("unexpected workspace settings: %#v", workspaceSettings)
 	}
 	if filepath.Base(service.settingsPath) != "GoMental.Settings.json" {
 		t.Fatalf("unexpected settings path: %s", service.settingsPath)

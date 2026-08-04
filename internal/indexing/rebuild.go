@@ -210,6 +210,7 @@ func (r Rebuilder) RebuildCore(ctx context.Context, root string) (RebuildResult,
 			projection.Metadata = graph.MetadataMemberships(note)
 			projection.Meta.Tags = note.Tags
 			projection.Meta.Type = note.Metadata.Type
+			projection.Meta.Favorite = note.Metadata.Favorite
 		}
 		projections = append(projections, projection)
 		r.report(RebuildProgress{Stage: ProgressGraph, Completed: i + 1, Total: len(summaries), NoteID: summary.ID})

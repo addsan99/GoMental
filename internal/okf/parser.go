@@ -94,6 +94,8 @@ func parseMetadata(frontmatter string) (domain.OKFMetadata, error) {
 			metadata.Resource = scalarString(value)
 		case "tags":
 			metadata.Tags = parseTags(value)
+		case "favorite":
+			metadata.Favorite = scalarBool(value)
 		case "timestamp":
 			metadata.Timestamp = parseTimestamp(value)
 		default:
@@ -109,6 +111,22 @@ func scalarString(value any) string {
 		return ""
 	}
 	return strings.TrimSpace(fmt.Sprint(value))
+}
+
+func scalarBool(value any) bool {
+	switch typed := value.(type) {
+	case bool:
+		return typed
+	case string:
+		switch strings.ToLower(strings.TrimSpace(typed)) {
+		case "true", "yes", "y", "1", "on":
+			return true
+		default:
+			return false
+		}
+	default:
+		return strings.EqualFold(strings.TrimSpace(fmt.Sprint(typed)), "true")
+	}
 }
 
 func parseTags(value any) []domain.Tag {

@@ -96,6 +96,7 @@ type Graph struct {
 type GraphFilter struct {
 	Tags                 []Tag
 	PathPrefix           string
+	FavoritesOnly        bool
 	IncludeUnresolved    bool
 	IncludeOrphans       bool
 	IncludeSoftLinks     bool
@@ -116,9 +117,10 @@ type GraphQuery struct {
 	Depth int     // hops from Seed; ignored when Seed is nil
 
 	// Metadata predicates restricting which note nodes are included.
-	Types      []string
-	Tags       []Tag
-	PathPrefix string
+	Types         []string
+	Tags          []Tag
+	PathPrefix    string
+	FavoritesOnly bool
 
 	IncludeSoftLinks     bool
 	IncludeMetadataLinks bool

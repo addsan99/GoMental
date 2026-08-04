@@ -81,12 +81,13 @@ func (s *Server) handleListNotes(w http.ResponseWriter, r *http.Request) {
 	limit, _ := strconv.Atoi(q.Get("limit"))
 	offset, _ := strconv.Atoi(q.Get("offset"))
 	page, err := s.service().ListNotesPage(r.Context(), application.ListNotesQueryDTO{
-		Offset: offset,
-		Limit:  limit,
-		SortBy: q.Get("sort"),
-		Desc:   q.Get("desc") == "true" || q.Get("desc") == "1",
-		Tag:    q.Get("tag"),
-		Search: q.Get("q"),
+		Offset:        offset,
+		Limit:         limit,
+		SortBy:        q.Get("sort"),
+		Desc:          q.Get("desc") == "true" || q.Get("desc") == "1",
+		Tag:           q.Get("tag"),
+		Search:        q.Get("q"),
+		FavoritesOnly: q.Get("favorites") == "true" || q.Get("favorites") == "1",
 	})
 	if err != nil {
 		writeError(w, err)
@@ -150,6 +151,25 @@ func (s *Server) handleSaveNote(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("ETag", strconv.Quote(note.Version))
 	}
 	s.recordAudit(r, "note.save", note.ID, note.Version, "ok", "")
+	writeJSON(w, http.StatusOK, note)
+}
+
+// PUT /api/notes/favorite
+func (s *Server) handleSetNoteFavorite(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		ID       string `json:"id"`
+		Favorite bool   `json:"favorite"`
+	}
+	if !decodeJSON(w, r, &body) {
+		return
+	}
+	note, err := s.service().SetNoteFavorite(r.Context(), body.ID, body.Favorite)
+	if err != nil {
+		s.recordAudit(r, "note.favorite", body.ID, "", "error", err.Error())
+		writeError(w, err)
+		return
+	}
+	s.recordAudit(r, "note.favorite", note.ID, note.Version, "ok", strconv.FormatBool(note.Favorite))
 	writeJSON(w, http.StatusOK, note)
 }
 

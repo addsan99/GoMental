@@ -26,6 +26,7 @@ type NoteMeta struct {
 	Type       string
 	ModifiedAt time.Time
 	Tags       []domain.Tag
+	Favorite   bool
 }
 
 type SQLiteStore struct {
@@ -85,6 +86,7 @@ CREATE TABLE IF NOT EXISTS notes (
   title TEXT NOT NULL DEFAULT '',
   path TEXT NOT NULL DEFAULT '',
   type TEXT NOT NULL DEFAULT '',
+  favorite INTEGER NOT NULL DEFAULT 0,
   modified_at TEXT NOT NULL DEFAULT ''
 );
 CREATE TABLE IF NOT EXISTS note_tags (
@@ -147,11 +149,15 @@ func (s *SQLiteStore) addMissingNoteColumns(ctx context.Context) error {
 	if err := rows.Err(); err != nil {
 		return err
 	}
-	for _, col := range []string{"title", "path", "type", "modified_at"} {
+	for _, col := range []string{"title", "path", "type", "favorite", "modified_at"} {
 		if _, ok := present[col]; ok {
 			continue
 		}
-		if _, err := s.db.ExecContext(ctx, `ALTER TABLE notes ADD COLUMN `+col+` TEXT NOT NULL DEFAULT ''`); err != nil {
+		definition := ` TEXT NOT NULL DEFAULT ''`
+		if col == "favorite" {
+			definition = ` INTEGER NOT NULL DEFAULT 0`
+		}
+		if _, err := s.db.ExecContext(ctx, `ALTER TABLE notes ADD COLUMN `+col+definition); err != nil {
 			return err
 		}
 	}
@@ -179,9 +185,13 @@ func upsertNoteMetaTx(ctx context.Context, tx *sql.Tx, meta NoteMeta) error {
 	if !meta.ModifiedAt.IsZero() {
 		modified = meta.ModifiedAt.UTC().Format(metaTimeFormat)
 	}
-	if _, err := tx.ExecContext(ctx, `INSERT INTO notes(id, title, path, type, modified_at) VALUES (?, ?, ?, ?, ?)
-ON CONFLICT(id) DO UPDATE SET title = excluded.title, path = excluded.path, type = excluded.type, modified_at = excluded.modified_at`,
-		string(meta.ID), meta.Title, meta.Path, meta.Type, modified); err != nil {
+	favorite := 0
+	if meta.Favorite {
+		favorite = 1
+	}
+	if _, err := tx.ExecContext(ctx, `INSERT INTO notes(id, title, path, type, favorite, modified_at) VALUES (?, ?, ?, ?, ?, ?)
+ON CONFLICT(id) DO UPDATE SET title = excluded.title, path = excluded.path, type = excluded.type, favorite = excluded.favorite, modified_at = excluded.modified_at`,
+		string(meta.ID), meta.Title, meta.Path, meta.Type, favorite, modified); err != nil {
 		return err
 	}
 	if _, err := tx.ExecContext(ctx, `DELETE FROM note_tags WHERE note_id = ?`, string(meta.ID)); err != nil {
@@ -582,6 +592,9 @@ func (s *SQLiteStore) selectedNotes(ctx context.Context, q domain.GraphQuery, fr
 			args = append(args, string(t))
 		}
 	}
+	if q.FavoritesOnly {
+		where = append(where, "favorite = 1")
+	}
 	query := `SELECT id FROM notes`
 	if len(where) > 0 {
 		query += " WHERE " + strings.Join(where, " AND ")
@@ -679,13 +692,14 @@ func (s *SQLiteStore) selectedEdges(ctx context.Context, q domain.GraphQuery, ke
 // ListNotesOptions controls a ListNotes query. The zero value returns every note
 // ordered by id ascending.
 type ListNotesOptions struct {
-	Offset int
-	Limit  int    // 0 = no limit (return all matching)
-	SortBy string // "title" | "modified" | "path" | "id" (default)
-	Desc   bool
-	Tag    string // optional exact-tag filter
-	Type   string // optional exact-type filter (case-insensitive)
-	Search string // optional case-insensitive substring over title/id
+	Offset        int
+	Limit         int    // 0 = no limit (return all matching)
+	SortBy        string // "title" | "modified" | "path" | "id" (default)
+	Desc          bool
+	Tag           string // optional exact-tag filter
+	Type          string // optional exact-type filter (case-insensitive)
+	Search        string // optional case-insensitive substring over title/id
+	FavoritesOnly bool
 }
 
 // NoteRow is one listable note's stored metadata.
@@ -694,6 +708,7 @@ type NoteRow struct {
 	Title      string
 	Path       string
 	Type       string
+	Favorite   bool
 	ModifiedAt string
 	Tags       []string
 }
@@ -732,6 +747,9 @@ func (s *SQLiteStore) ListNotes(ctx context.Context, opts ListNotesOptions) (Lis
 		where = append(where, `(LOWER(title) LIKE ? ESCAPE '\' OR LOWER(id) LIKE ? ESCAPE '\')`)
 		args = append(args, pattern, pattern)
 	}
+	if opts.FavoritesOnly {
+		where = append(where, "favorite = 1")
+	}
 	whereSQL := ""
 	if len(where) > 0 {
 		whereSQL = " WHERE " + strings.Join(where, " AND ")
@@ -742,7 +760,7 @@ func (s *SQLiteStore) ListNotes(ctx context.Context, opts ListNotesOptions) (Lis
 		return ListNotesResult{}, err
 	}
 
-	query := `SELECT id, title, path, type, modified_at FROM notes` + whereSQL + ` ORDER BY ` + orderByClause(opts.SortBy, opts.Desc)
+	query := `SELECT id, title, path, type, favorite, modified_at FROM notes` + whereSQL + ` ORDER BY ` + orderByClause(opts.SortBy, opts.Desc)
 	pageArgs := append([]any{}, args...)
 	if opts.Limit > 0 {
 		query += ` LIMIT ? OFFSET ?`
@@ -757,9 +775,11 @@ func (s *SQLiteStore) ListNotes(ctx context.Context, opts ListNotesOptions) (Lis
 	index := map[string]int{}
 	for rows.Next() {
 		var row NoteRow
-		if err := rows.Scan(&row.ID, &row.Title, &row.Path, &row.Type, &row.ModifiedAt); err != nil {
+		var favorite int
+		if err := rows.Scan(&row.ID, &row.Title, &row.Path, &row.Type, &favorite, &row.ModifiedAt); err != nil {
 			return ListNotesResult{}, err
 		}
+		row.Favorite = favorite != 0
 		index[row.ID] = len(items)
 		items = append(items, row)
 	}
@@ -870,6 +890,9 @@ func (s *SQLiteStore) allEdges(ctx context.Context, filter domain.GraphFilter) (
 		query += ` AND source LIKE ?`
 		args = append(args, filter.PathPrefix+"%")
 	}
+	if filter.FavoritesOnly {
+		query += ` AND EXISTS (SELECT 1 FROM notes n WHERE n.id = links.source AND n.favorite = 1)`
+	}
 	query += ` ORDER BY source, target`
 	rows, err := s.db.QueryContext(ctx, query, args...)
 	if err != nil {
@@ -910,9 +933,16 @@ func (s *SQLiteStore) allEdges(ctx context.Context, filter domain.GraphFilter) (
 func (s *SQLiteStore) allNoteNodes(ctx context.Context, filter domain.GraphFilter) ([]domain.GraphNode, error) {
 	query := `SELECT id FROM notes`
 	args := make([]any, 0, 1)
+	var where []string
 	if filter.PathPrefix != "" {
-		query += ` WHERE id LIKE ?`
+		where = append(where, "id LIKE ?")
 		args = append(args, filter.PathPrefix+"%")
+	}
+	if filter.FavoritesOnly {
+		where = append(where, "favorite = 1")
+	}
+	if len(where) > 0 {
+		query += ` WHERE ` + strings.Join(where, " AND ")
 	}
 	query += ` ORDER BY id`
 	rows, err := s.db.QueryContext(ctx, query, args...)

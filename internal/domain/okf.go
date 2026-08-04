@@ -8,6 +8,7 @@ type OKFMetadata struct {
 	Description string
 	Resource    string
 	Tags        []Tag
+	Favorite    bool
 	Timestamp   *time.Time
 	Unknown     map[string]any
 }

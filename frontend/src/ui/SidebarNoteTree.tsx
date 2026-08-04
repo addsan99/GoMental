@@ -1,6 +1,6 @@
 import {useEffect, useMemo, useRef, useState} from 'react';
 import type {CSSProperties, DragEvent} from 'react';
-import {ChevronIcon, FileIcon, FolderIcon} from './icons';
+import {ChevronIcon, FileIcon, FolderIcon, StarIcon} from './icons';
 import {basename} from '../util';
 import type {application} from '../../wailsjs/go/models';
 
@@ -47,6 +47,7 @@ export default function SidebarNoteTree({
   activeTab,
   onSelectNote,
   onToggleFolder,
+  onToggleFavorite,
   onMoveNote,
   moveDisabled = false,
 }: {
@@ -56,6 +57,7 @@ export default function SidebarNoteTree({
   activeTab: string;
   onSelectNote: (id: string) => void;
   onToggleFolder: (name: string) => void;
+  onToggleFavorite?: (id: string, favorite: boolean) => void;
   onMoveNote?: (id: string, folder: string) => void;
   moveDisabled?: boolean;
 }) {
@@ -173,6 +175,29 @@ export default function SidebarNoteTree({
       >
         <FileIcon size={15} className="gm-tree-file-icon" />
         <span className="gm-tree-file-label">{row.note.title || basename(row.note.id)}</span>
+        <span
+          role="button"
+          tabIndex={0}
+          className={row.note.favorite ? 'gm-star gm-star-active' : 'gm-star'}
+          title={row.note.favorite ? 'Remove from favorites' : 'Add to favorites'}
+          aria-label={row.note.favorite ? 'Remove from favorites' : 'Add to favorites'}
+          aria-pressed={Boolean(row.note.favorite)}
+          onClick={(event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            onToggleFavorite?.(row.note.id, !row.note.favorite);
+          }}
+          onKeyDown={(event) => {
+            if (event.key !== 'Enter' && event.key !== ' ') {
+              return;
+            }
+            event.preventDefault();
+            event.stopPropagation();
+            onToggleFavorite?.(row.note.id, !row.note.favorite);
+          }}
+        >
+          <StarIcon size={14} filled={Boolean(row.note.favorite)} />
+        </span>
       </button>
     );
   };

@@ -34,6 +34,7 @@ type NoteSummary struct {
 	Path       NotePath
 	Type       string
 	Tags       []Tag
+	Favorite   bool
 	ModifiedAt time.Time
 }
 

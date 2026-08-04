@@ -9,7 +9,7 @@ export const LENSES: Lens[] = [
     description: 'Where a newcomer starts',
     apply: () => ({
       seed: undefined,
-      facets: {types: ['intro'], tags: [], folders: []},
+      facets: {types: ['intro'], tags: [], folders: [], favorites: false},
       layout: 'force',
       groupBy: undefined,
       includeSoftLinks: false,
@@ -21,7 +21,7 @@ export const LENSES: Lens[] = [
     description: 'Task-oriented guides',
     apply: () => ({
       seed: undefined,
-      facets: {types: ['playbook'], tags: [], folders: []},
+      facets: {types: ['playbook'], tags: [], folders: [], favorites: false},
       layout: 'zoned',
       groupBy: 'folder',
     }),
@@ -32,7 +32,7 @@ export const LENSES: Lens[] = [
     description: 'The knowledge landscape',
     apply: () => ({
       seed: undefined,
-      facets: {types: ['concept'], tags: [], folders: []},
+      facets: {types: ['concept'], tags: [], folders: [], favorites: false},
       layout: 'zoned',
       groupBy: 'folder',
     }),
@@ -43,7 +43,7 @@ export const LENSES: Lens[] = [
     description: 'ADRs & policies',
     apply: () => ({
       seed: undefined,
-      facets: {types: ['decision', 'policy'], tags: [], folders: []},
+      facets: {types: ['decision', 'policy'], tags: [], folders: [], favorites: false},
       layout: 'force',
       groupBy: undefined,
     }),
@@ -55,7 +55,7 @@ export const LENSES: Lens[] = [
     apply: (ctx) => ({
       seed: ctx.selectedId,
       depth: 2,
-      facets: {types: [], tags: [], folders: []},
+      facets: {types: [], tags: [], folders: [], favorites: false},
       layout: 'radial',
       groupBy: undefined,
     }),
@@ -66,7 +66,7 @@ export const LENSES: Lens[] = [
     description: 'Full graph',
     apply: () => ({
       seed: undefined,
-      facets: {types: [], tags: [], folders: []},
+      facets: {types: [], tags: [], folders: [], favorites: false},
       layout: 'force',
       groupBy: undefined,
     }),

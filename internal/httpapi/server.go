@@ -150,6 +150,7 @@ func (s *Server) buildHandler() http.Handler {
 	mux.HandleFunc("POST /api/notes/move", s.gate(auth.RoleEditor, s.contentWrite(s.handleMoveNote)))
 	mux.HandleFunc("GET /api/notes/{id...}", s.gate(auth.RoleViewer, s.handleReadNote))
 	mux.HandleFunc("PUT /api/notes/{id...}", s.gate(auth.RoleEditor, s.contentWrite(s.handleSaveNote)))
+	mux.HandleFunc("PUT /api/notes/favorite", s.gate(auth.RoleEditor, s.contentWrite(s.handleSetNoteFavorite)))
 	mux.HandleFunc("DELETE /api/notes/{id...}", s.gate(auth.RoleEditor, s.contentWrite(s.handleDeleteNote)))
 	mux.HandleFunc("POST /api/import", s.gate(auth.RoleEditor, s.contentWrite(s.handleImport)))
 	mux.HandleFunc("POST /api/assets/{id...}", s.gate(auth.RoleEditor, s.contentWrite(s.handleSaveAsset)))

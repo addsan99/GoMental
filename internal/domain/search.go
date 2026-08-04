@@ -11,15 +11,17 @@ type SearchDocument struct {
 	Tags        []Tag
 	Aliases     []string
 	LinkTargets []string
+	Favorite    bool
 	ModifiedAt  int64
 }
 
 type SearchQuery struct {
-	Text       string
-	Tags       []Tag
-	PathPrefix string
-	Limit      int
-	Cursor     string
+	Text          string
+	Tags          []Tag
+	PathPrefix    string
+	FavoritesOnly bool
+	Limit         int
+	Cursor        string
 }
 
 type SearchResult struct {
@@ -28,6 +30,7 @@ type SearchResult struct {
 	Title     string
 	Score     float64
 	Fragments []string
+	Favorite  bool
 }
 
 type SearchIndex interface {
@@ -59,6 +62,7 @@ func SearchDocumentFromParsed(note ParsedOKFNote, path NotePath) SearchDocument 
 		Headings:    headings,
 		Tags:        note.Tags,
 		LinkTargets: links,
+		Favorite:    note.Metadata.Favorite,
 		ModifiedAt:  note.ModifiedAt.Unix(),
 	}
 }

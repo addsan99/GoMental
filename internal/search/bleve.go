@@ -31,6 +31,7 @@ type storedDocument struct {
 	Tags        []string `json:"tags"`
 	Aliases     []string `json:"aliases"`
 	LinkTargets []string `json:"linkTargets"`
+	Favorite    bool     `json:"favorite"`
 	ModifiedAt  int64    `json:"modifiedAt"`
 }
 
@@ -79,7 +80,7 @@ func (b *BleveIndex) Search(ctx context.Context, query domain.SearchQuery) ([]do
 	}
 	bleveQuery := buildQuery(query)
 	request := bleve.NewSearchRequestOptions(bleveQuery, limit, 0, false)
-	request.Fields = []string{"id", "path", "title"}
+	request.Fields = []string{"id", "path", "title", "favorite"}
 	request.Highlight = bleve.NewHighlightWithStyle("html")
 	request.Highlight.AddField("title")
 	request.Highlight.AddField("body")
@@ -91,6 +92,9 @@ func (b *BleveIndex) Search(ctx context.Context, query domain.SearchQuery) ([]do
 	results := make([]domain.SearchResult, 0, len(response.Hits))
 	for _, hit := range response.Hits {
 		result := domain.SearchResult{ID: domain.NoteID(hit.ID), Score: hit.Score}
+		if value, ok := hit.Fields["favorite"].(bool); ok {
+			result.Favorite = value
+		}
 		if value, ok := hit.Fields["path"].(string); ok {
 			result.Path = domain.NotePath(value)
 		}
@@ -158,6 +162,9 @@ func indexMapping() mapping.IndexMapping {
 	doc.AddFieldMappingsAt("id", keyword)
 	doc.AddFieldMappingsAt("path", keyword)
 	doc.AddFieldMappingsAt("tags", keyword)
+	favorite := bleve.NewBooleanFieldMapping()
+	favorite.Store = true
+	doc.AddFieldMappingsAt("favorite", favorite)
 	number := bleve.NewNumericFieldMapping()
 	doc.AddFieldMappingsAt("modifiedAt", number)
 	idx.DefaultMapping = doc
@@ -191,6 +198,11 @@ func buildQuery(input domain.SearchQuery) querypkg.Query {
 		prefix := bleve.NewPrefixQuery(input.PathPrefix)
 		prefix.SetField("path")
 		parts = append(parts, prefix)
+	}
+	if input.FavoritesOnly {
+		favorite := bleve.NewBoolFieldQuery(true)
+		favorite.SetField("favorite")
+		parts = append(parts, favorite)
 	}
 	if len(parts) == 0 {
 		return bleve.NewMatchAllQuery()
@@ -229,6 +241,7 @@ func toStored(document domain.SearchDocument) storedDocument {
 		Tags:        tags,
 		Aliases:     document.Aliases,
 		LinkTargets: document.LinkTargets,
+		Favorite:    document.Favorite,
 		ModifiedAt:  document.ModifiedAt,
 	}
 }

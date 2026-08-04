@@ -27,10 +27,13 @@ export function facetMatchesNote(note: application.NoteSummaryDTO | undefined, f
   if (facets.folders.length && !facets.folders.some((folder) => folderOf(note.path) === folder)) {
     return false
   }
+  if (facets.favorites && !note.favorite) {
+    return false
+  }
   return true
 }
 
 // True when any facet axis has a selection (so callers can short-circuit).
 export function anyFacetActive(facets: FacetFilter): boolean {
-  return facets.types.length > 0 || facets.tags.length > 0 || facets.folders.length > 0
+  return facets.types.length > 0 || facets.tags.length > 0 || facets.folders.length > 0 || facets.favorites
 }

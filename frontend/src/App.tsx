@@ -33,6 +33,7 @@ import {
   RefreshIcon,
   SaveIcon,
   SearchIcon,
+  StarIcon,
   SunIcon,
 } from './ui/icons';
 import {
@@ -55,11 +56,12 @@ import {
   SaveSettings,
   SaveUIState,
   Search,
+  SetNoteFavorite,
   SelectWorkspaceDirectory,
   onEvent,
 } from './transport';
 import type {application} from '../wailsjs/go/models';
-import type {AppInfoWithMode, GoMentalSettings, NoteDTOWithVersion} from './transport/types';
+import type {AppInfoWithMode, GoMentalSettings, GoMentalWorkspaceSettings, NoteDTOWithVersion} from './transport/types';
 
 // Heavy views are code-split so they stay out of the initial bundle: the graph
 // canvas (sigma + graphology) and the two editors (@mdxeditor / CodeMirror) are
@@ -96,7 +98,7 @@ type SaveState = 'idle' | 'dirty' | 'saving' | 'saved' | 'conflict';
 type SearchStatus = 'idle' | 'searching' | 'ready' | 'error';
 type WorkspaceTab = 'note' | 'graph';
 type ThemeMode = 'light' | 'dark';
-type SettingsSection = 'appearance' | 'noteView' | 'graphView';
+type SettingsSection = 'appearance' | 'noteView' | 'graphView' | 'workspaceSettings';
 type NoteTemplateID =
   | 'concept'
   | 'adr'
@@ -160,6 +162,7 @@ const DEFAULT_SETTINGS: GoMentalSettings = {
     defaultMode: '2d',
     defaultDepth: 2,
   },
+  workspaces: {},
 };
 
 function App() {
@@ -209,7 +212,7 @@ function App() {
   const [theme, setTheme] = useState<ThemeMode>(() => readStoredTheme());
   // Facet selection (Types / Tags / Folders), owned here and shared by the right-rail
   // filter panel, the note-list tree (hides non-matches), and both graph instances.
-  const [facets, setFacets] = useState<FacetFilter>({types: [], tags: [], folders: []});
+  const [facets, setFacets] = useState<FacetFilter>({types: [], tags: [], folders: [], favorites: false});
   // Browser-style visit history of note IDs. Every selection path funnels through
   // setSelectedID, so a single effect records history; back/forward/dropdown jumps
   // set suppressHistoryRef to avoid re-recording the entry they navigate to. Stack
@@ -217,6 +220,7 @@ function App() {
   const [nav, setNav] = useState<{stack: string[]; index: number}>({stack: [], index: -1});
   const suppressHistoryRef = useRef(false);
   const [historyMenuOpen, setHistoryMenuOpen] = useState(false);
+  const [openWorkspaceMenuOpen, setOpenWorkspaceMenuOpen] = useState(false);
   const [settings, setSettings] = useState<GoMentalSettings>(DEFAULT_SETTINGS);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsSection, setSettingsSection] = useState<SettingsSection>('appearance');
@@ -240,6 +244,7 @@ function App() {
   const mdxEditorRef = useRef<MdxNoteEditorHandle | null>(null);
   const codeMirrorRef = useRef<CodeMirrorEditorHandle | null>(null);
   const historyNavRef = useRef<HTMLDivElement | null>(null);
+  const openWorkspaceMenuRef = useRef<HTMLDivElement | null>(null);
   const searchRequestRef = useRef(0);
   const noteRequestRef = useRef(0);
   const initialLoadRef = useRef(false);
@@ -376,7 +381,7 @@ function App() {
   }, [loadNotes, projectionActive, selectedID, showToast]);
 
   const createNote = useCallback(async () => {
-    if (!workspace || busy || info.readOnly) {
+    if (!workspace || busy || info.readOnly || workspaceIsReadOnly(settings, workspace.root)) {
       return;
     }
     const title = newNoteTitle.trim();
@@ -417,10 +422,10 @@ function App() {
     } finally {
       setBusy('');
     }
-  }, [busy, info.readOnly, loadNotes, newNoteID, newNoteTemplate, newNoteTitle, notes, showToast, theme, workspace]);
+  }, [busy, info.readOnly, loadNotes, newNoteID, newNoteTemplate, newNoteTitle, notes, settings, showToast, theme, workspace]);
 
   const importFromURL = useCallback(async () => {
-    if (!workspace || busy || info.readOnly) {
+    if (!workspace || busy || info.readOnly || workspaceIsReadOnly(settings, workspace.root)) {
       return;
     }
     const url = importURL.trim();
@@ -451,7 +456,7 @@ function App() {
     } finally {
       setBusy('');
     }
-  }, [busy, importURL, info.readOnly, loadNotes, showToast, theme, workspace]);
+  }, [busy, importURL, info.readOnly, loadNotes, settings, showToast, theme, workspace]);
 
   useEffect(() => {
     const offProgress = onEvent('index:progress', (payload: RebuildProgress) => {
@@ -683,7 +688,7 @@ function App() {
   }, []);
 
   const saveCurrentNote = useCallback(async (exitEditMode = false, force = false) => {
-    if (!selectedID || !selectedNote || saveState === 'saving' || info.readOnly) {
+    if (!selectedID || !selectedNote || saveState === 'saving' || info.readOnly || workspaceIsReadOnly(settings, workspace?.root || '')) {
       return;
     }
     const contentToSave = force ? draft : (isEditing ? draft : (mdxEditorRef.current?.currentContent() ?? draft));
@@ -724,10 +729,10 @@ function App() {
       setSaveState('dirty');
       setError(errorMessage(err));
     }
-  }, [draft, flashSaved, info.readOnly, isEditing, loadNotes, noteVersion, savedContent, saveState, selectedID, selectedNote, showToast]);
+  }, [draft, flashSaved, info.readOnly, isEditing, loadNotes, noteVersion, savedContent, saveState, selectedID, selectedNote, settings, showToast, workspace?.root]);
 
   const deleteCurrentNote = useCallback(async () => {
-    if (!selectedID || !selectedNote || info.readOnly || busy || projectionActive) {
+    if (!selectedID || !selectedNote || info.readOnly || workspaceIsReadOnly(settings, workspace?.root || '') || busy || projectionActive) {
       return;
     }
     const title = notes.find((note) => note.id === selectedID)?.title || basename(selectedID);
@@ -760,10 +765,38 @@ function App() {
     } finally {
       setBusy('');
     }
-  }, [busy, info.readOnly, loadNotes, notes, projectionActive, selectedID, selectedNote, showToast]);
+  }, [busy, info.readOnly, loadNotes, notes, projectionActive, selectedID, selectedNote, settings, showToast, workspace?.root]);
+
+  const toggleNoteFavorite = useCallback(async (id: string, favorite: boolean) => {
+    if (!id || info.readOnly || workspaceIsReadOnly(settings, workspace?.root || '') || busy || projectionActive) {
+      return;
+    }
+    if (id === selectedID && isEditing && draft !== savedContent) {
+      setError("Save or discard your edits before changing this note's favorite state.");
+      return;
+    }
+    setError('');
+    setNotes((current) => current.map((note) => note.id === id ? {...note, favorite} : note));
+    setSearchResults((current) => current.map((result) => result.id === id ? {...result, favorite} : result));
+    try {
+      const saved = await SetNoteFavorite({id, favorite});
+      if (selectedID === id) {
+        setSelectedNote(saved);
+        setDraft(saved.content);
+        setSavedContent(saved.content);
+        setNoteVersion(saved.version ?? '');
+      }
+      await loadNotes(selectedID || id);
+      setGraphRevision((value) => value + 1);
+      showToast(favorite ? 'Added to favorites' : 'Removed from favorites');
+    } catch (err) {
+      await loadNotes(selectedID || id).catch(() => {});
+      setError(errorMessage(err));
+    }
+  }, [busy, draft, info.readOnly, isEditing, loadNotes, projectionActive, savedContent, selectedID, settings, showToast, workspace?.root]);
 
   const moveNoteToFolder = useCallback(async (id: string, folder: string) => {
-    if (!workspace || info.readOnly || busy || projectionActive) {
+    if (!workspace || info.readOnly || workspaceIsReadOnly(settings, workspace.root) || busy || projectionActive) {
       return;
     }
     const cleanFolder = folder.replace(/^\/+|\/+$/g, '');
@@ -792,7 +825,7 @@ function App() {
     } finally {
       setBusy('');
     }
-  }, [busy, info.readOnly, isEditing, loadNotes, notes, projectionActive, selectedID, showToast, workspace]);
+  }, [busy, info.readOnly, isEditing, loadNotes, notes, projectionActive, selectedID, settings, showToast, workspace]);
 
   const reloadFromServer = useCallback(async () => {
     if (!selectedID) {
@@ -846,6 +879,7 @@ function App() {
             text: searchText.trim(),
             tags: [],
             pathPrefix: '',
+            favoritesOnly: facets.favorites,
             limit: 50,
           });
           if (searchRequestRef.current !== requestID) {
@@ -865,7 +899,7 @@ function App() {
     }, 220);
 
     return () => window.clearTimeout(timer);
-  }, [searchText, workspace]);
+  }, [facets.favorites, searchText, workspace]);
 
   const handleDraftChange = useCallback((next: string) => {
     setDraft(next);
@@ -970,6 +1004,29 @@ function App() {
       window.removeEventListener('keydown', onKey);
     };
   }, [historyMenuOpen]);
+
+  // Close the workspace picker dropdown on outside click or Escape.
+  useEffect(() => {
+    if (!openWorkspaceMenuOpen) {
+      return;
+    }
+    const onPointerDown = (event: PointerEvent) => {
+      if (openWorkspaceMenuRef.current && !openWorkspaceMenuRef.current.contains(event.target as Node)) {
+        setOpenWorkspaceMenuOpen(false);
+      }
+    };
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setOpenWorkspaceMenuOpen(false);
+      }
+    };
+    window.addEventListener('pointerdown', onPointerDown);
+    window.addEventListener('keydown', onKey);
+    return () => {
+      window.removeEventListener('pointerdown', onPointerDown);
+      window.removeEventListener('keydown', onKey);
+    };
+  }, [openWorkspaceMenuOpen]);
 
   const cancelEdit = useCallback(() => {
     setDraft(savedContent);
@@ -1218,15 +1275,33 @@ function App() {
   const breadcrumbFolder = selectedID.includes('/') ? selectedID.slice(0, selectedID.lastIndexOf('/')) : '';
   const fileNameShort = basename(selectedID);
   const dirty = saveState === 'dirty' || saveState === 'conflict';
-  const readOnly = info.readOnly === true;
+  const currentWorkspaceSettings = workspace?.root ? workspaceSettingsFor(settings, workspace.root) : defaultWorkspaceSettings();
+  const workspaceReadOnly = Boolean(workspace && currentWorkspaceSettings.accessMode !== 'editable');
+  const readOnly = info.readOnly === true || workspaceReadOnly;
   const showSaveBar = Boolean(selectedNote) && !readOnly;
   const git = info.git ?? null;
-  const authoringDisabledTitle = readOnly ? 'Read-only — content is managed in git.' : undefined;
+  const readOnlyBannerText = info.readOnly === true
+    ? 'Read-only — content is managed in git.'
+    : currentWorkspaceSettings.accessMode === 'readOnlyGit'
+      ? 'Read-only — workspace is configured as git connected.'
+      : 'Read-only — workspace is configured local read-only.';
+  const authoringDisabledTitle = readOnly ? readOnlyBannerText : undefined;
+  const workspaceNoteTemplateOptions = NOTE_TEMPLATE_OPTIONS.filter((template) => currentWorkspaceSettings.enabledTypes.includes(template.id));
+  const enabledNoteTemplateOptions = workspaceNoteTemplateOptions.length > 0 ? workspaceNoteTemplateOptions : NOTE_TEMPLATE_OPTIONS;
   // Server and viewer modes pin the workspace to a configured root, so the
   // header "Open" affordance (which would pick a different folder) does not
   // apply — the picker is a no-op in server mode and reopens the same root in
   // viewer mode. Hide it to avoid the dead/wandering control.
   const workspacePinned = info.mode === 'server' || info.mode === 'viewer';
+
+  useEffect(() => {
+    if (!workspace) {
+      return;
+    }
+    if (!enabledNoteTemplateOptions.some((template) => template.id === newNoteTemplate)) {
+      setNewNoteTemplate((currentWorkspaceSettings.defaultType || enabledNoteTemplateOptions[0].id) as NoteTemplateID);
+    }
+  }, [currentWorkspaceSettings.defaultType, enabledNoteTemplateOptions, newNoteTemplate, workspace]);
 
   return (
     <div className="gm-shell" data-theme={theme}>
@@ -1263,10 +1338,63 @@ function App() {
         )}
 
         {!workspacePinned && (
-          <button type="button" className="gm-btn gm-btn-ghost" onClick={chooseWorkspace} disabled={interactionBusy}>
-            <FolderIcon size={15} />
-            Open
-          </button>
+          <div className="gm-open-menu-wrap" ref={openWorkspaceMenuRef}>
+            <button
+              type="button"
+              className="gm-btn gm-btn-ghost gm-open-menu-trigger"
+              onClick={() => {
+                setOpenWorkspaceMenuOpen((open) => !open);
+                void loadRecent().catch(() => {});
+              }}
+              disabled={interactionBusy}
+              aria-haspopup="menu"
+              aria-expanded={openWorkspaceMenuOpen}
+            >
+              <FolderIcon size={15} />
+              Open
+              <ChevronIcon size={13} className={openWorkspaceMenuOpen ? 'gm-open-menu-chevron open' : 'gm-open-menu-chevron'} />
+            </button>
+            {openWorkspaceMenuOpen && (
+              <div className="gm-open-menu" role="menu" aria-label="Open workspace">
+                {recent.slice(0, 6).length > 0 ? (
+                  <>
+                    <div className="gm-open-menu-label">Recent workspaces</div>
+                    {recent.slice(0, 6).map((item) => (
+                      <button
+                        type="button"
+                        className="gm-open-menu-item"
+                        role="menuitem"
+                        key={item.path}
+                        title={item.path}
+                        onClick={() => {
+                          setOpenWorkspaceMenuOpen(false);
+                          void openWorkspace(item.path);
+                        }}
+                      >
+                        <span className="gm-open-menu-name">{basename(item.path)}</span>
+                        <span className="gm-open-menu-path">{item.path}</span>
+                      </button>
+                    ))}
+                    <div className="gm-open-menu-separator" />
+                  </>
+                ) : (
+                  <div className="gm-open-menu-empty">No recent workspaces</div>
+                )}
+                <button
+                  type="button"
+                  className="gm-open-menu-item gm-open-menu-browse"
+                  role="menuitem"
+                  onClick={() => {
+                    setOpenWorkspaceMenuOpen(false);
+                    void chooseWorkspace();
+                  }}
+                >
+                  <FolderIcon size={15} />
+                  <span>Browse…</span>
+                </button>
+              </div>
+            )}
+          </div>
         )}
         <button type="button" className="gm-btn gm-btn-ghost" onClick={rebuildWorkspace} disabled={!workspace || interactionBusy}>
           <span className={projectionActive ? 'gm-spin' : ''}><RefreshIcon size={15} /></span>
@@ -1292,7 +1420,7 @@ function App() {
 
       {readOnly && (
         <div className="gm-readonly-banner" role="status">
-          <span>Read-only — content is managed in git.</span>
+          <span>{readOnlyBannerText}</span>
         </div>
       )}
 
@@ -1312,7 +1440,11 @@ function App() {
                 <button
                   type="button"
                   className="gm-btn gm-btn-primary gm-btn-sm"
-                  onClick={() => { setImportOpen(false); setNewNoteOpen((open) => !open); }}
+                  onClick={() => {
+                    setImportOpen(false);
+                    setNewNoteTemplate((currentWorkspaceSettings.defaultType || enabledNoteTemplateOptions[0].id) as NoteTemplateID);
+                    setNewNoteOpen((open) => !open);
+                  }}
                   disabled={!workspace || interactionBusy || readOnly}
                   title={authoringDisabledTitle}
                 >
@@ -1350,7 +1482,7 @@ function App() {
                 <label>
                   <span>Template</span>
                   <select value={newNoteTemplate} onChange={(event) => setNewNoteTemplate(event.target.value as NoteTemplateID)} autoFocus>
-                    {NOTE_TEMPLATE_OPTIONS.map((template) => (
+                    {enabledNoteTemplateOptions.map((template) => (
                       <option key={template.id} value={template.id}>{template.label}</option>
                     ))}
                   </select>
@@ -1393,6 +1525,7 @@ function App() {
                 query={searchText}
                 error={searchError}
                 onOpen={openSearchResult}
+                onToggleFavorite={toggleNoteFavorite}
               />
             ) : (
               <SidebarNoteTree
@@ -1402,6 +1535,7 @@ function App() {
                 activeTab={activeTab}
                 onSelectNote={selectNote}
                 onToggleFolder={toggleFolder}
+                onToggleFavorite={toggleNoteFavorite}
                 onMoveNote={moveNoteToFolder}
                 moveDisabled={readOnly || interactionBusy}
               />
@@ -1853,10 +1987,19 @@ function App() {
       <SettingsModal
         open={settingsOpen}
         settings={settings}
+        recent={recent}
+        currentWorkspace={workspace?.root || ''}
         activeSection={settingsSection}
         saveState={settingsSaveState}
         onClose={() => setSettingsOpen(false)}
         onSectionChange={setSettingsSection}
+        onBrowseWorkspace={async () => {
+          const path = await SelectWorkspaceDirectory();
+          if (path) {
+            void loadRecent().catch(() => {});
+          }
+          return path;
+        }}
         onChange={persistSettings}
       />
       <Toast message={toastMsg} />
@@ -1878,20 +2021,32 @@ function DetailRow({label, value}: {label: string; value: string}) {
 function SettingsModal({
   open,
   settings,
+  recent,
+  currentWorkspace,
   activeSection,
   saveState,
   onClose,
   onSectionChange,
+  onBrowseWorkspace,
   onChange,
 }: {
   open: boolean;
   settings: GoMentalSettings;
+  recent: application.RecentWorkspaceDTO[];
+  currentWorkspace: string;
   activeSection: SettingsSection;
   saveState: 'idle' | 'saving' | 'saved' | 'error';
   onClose: () => void;
   onSectionChange: (section: SettingsSection) => void;
+  onBrowseWorkspace: () => Promise<string>;
   onChange: (settings: GoMentalSettings) => void;
 }) {
+  const workspacePaths = useMemo(
+    () => knownWorkspacePaths(settings, recent, currentWorkspace),
+    [currentWorkspace, recent, settings],
+  );
+  const [selectedWorkspacePath, setSelectedWorkspacePath] = useState('');
+
   useEffect(() => {
     if (!open) {
       return;
@@ -1906,6 +2061,13 @@ function SettingsModal({
     return () => window.removeEventListener('keydown', onKey);
   }, [onClose, open]);
 
+  useEffect(() => {
+    if (!open) {
+      return;
+    }
+    setSelectedWorkspacePath((current) => current || currentWorkspace || workspacePaths[0] || '');
+  }, [currentWorkspace, open, workspacePaths]);
+
   if (!open) {
     return null;
   }
@@ -1914,8 +2076,41 @@ function SettingsModal({
     {id: 'appearance', label: 'Appearance'},
     {id: 'noteView', label: 'Note View'},
     {id: 'graphView', label: 'Graph View'},
+    {id: 'workspaceSettings', label: 'Workspace Settings'},
   ];
   const saveLabel = saveState === 'saving' ? 'Saving...' : saveState === 'saved' ? 'Saved' : saveState === 'error' ? 'Could not save' : 'Auto-saved';
+  const selectedWorkspaceSettings = selectedWorkspacePath
+    ? workspaceSettingsFor(settings, selectedWorkspacePath)
+    : defaultWorkspaceSettings();
+  const updateSelectedWorkspaceSettings = (nextWorkspaceSettings: GoMentalWorkspaceSettings) => {
+    if (!selectedWorkspacePath) {
+      return;
+    }
+    onChange({
+      ...settings,
+      workspaces: {
+        ...settings.workspaces,
+        [selectedWorkspacePath]: normalizeWorkspaceSettings(nextWorkspaceSettings),
+      },
+    });
+  };
+  const addWorkspace = async () => {
+    const path = await onBrowseWorkspace();
+    const trimmed = path.trim();
+    if (!trimmed) {
+      return;
+    }
+    setSelectedWorkspacePath(trimmed);
+    if (!settings.workspaces[trimmed]) {
+      onChange({
+        ...settings,
+        workspaces: {
+          ...settings.workspaces,
+          [trimmed]: defaultWorkspaceSettings(),
+        },
+      });
+    }
+  };
 
   return (
     <div className="gm-settings-scrim" onClick={onClose} role="presentation">
@@ -2037,6 +2232,129 @@ function SettingsModal({
                 </label>
               </SettingsGroup>
             )}
+            {activeSection === 'workspaceSettings' && (
+              <SettingsGroup title="Workspace Settings">
+                <div className="gm-workspace-settings">
+                  <div className="gm-workspace-list">
+                    <div className="gm-workspace-list-head">
+                      <span>Known workspaces</span>
+                      <button type="button" className="gm-btn gm-btn-sm gm-btn-ghost" onClick={() => void addWorkspace()}>
+                        <FolderIcon size={14} />Browse
+                      </button>
+                    </div>
+                    {workspacePaths.length > 0 ? (
+                      workspacePaths.map((path) => (
+                        <button
+                          type="button"
+                          key={path}
+                          className={selectedWorkspacePath === path ? 'gm-workspace-item active' : 'gm-workspace-item'}
+                          onClick={() => setSelectedWorkspacePath(path)}
+                        >
+                          <span className="gm-workspace-name">{basename(path)}</span>
+                          <span className="gm-workspace-path">{path}</span>
+                        </button>
+                      ))
+                    ) : (
+                      <div className="gm-workspace-empty">No recent workspaces yet.</div>
+                    )}
+                  </div>
+                  <div className="gm-workspace-editor">
+                    {selectedWorkspacePath ? (
+                      <>
+                        <div className="gm-workspace-editor-title">
+                          <span>{basename(selectedWorkspacePath)}</span>
+                          <code>{selectedWorkspacePath}</code>
+                        </div>
+                        <label className="gm-setting-row">
+                          <span>
+                            <strong>Default type</strong>
+                            <small>Used as the starting type for new notes in this workspace.</small>
+                          </span>
+                          <select
+                            value={selectedWorkspaceSettings.defaultType}
+                            onChange={(event) => updateSelectedWorkspaceSettings({
+                              ...selectedWorkspaceSettings,
+                              defaultType: event.target.value,
+                              enabledTypes: ensureEnabledType(selectedWorkspaceSettings.enabledTypes, event.target.value),
+                            })}
+                          >
+                            {NOTE_TEMPLATE_OPTIONS.map((template) => (
+                              <option key={template.id} value={template.id}>{template.label}</option>
+                            ))}
+                          </select>
+                        </label>
+                        <div className="gm-setting-block">
+                          <div>
+                            <strong>Enabled types</strong>
+                            <small>Controls which note templates are available in this workspace.</small>
+                          </div>
+                          <div className="gm-type-checks">
+                            {NOTE_TEMPLATE_OPTIONS.map((template) => {
+                              const checked = selectedWorkspaceSettings.enabledTypes.includes(template.id);
+                              return (
+                                <label className="gm-type-check" key={template.id}>
+                                  <input
+                                    type="checkbox"
+                                    checked={checked}
+                                    onChange={(event) => {
+                                      const enabledTypes = event.target.checked
+                                        ? ensureEnabledType(selectedWorkspaceSettings.enabledTypes, template.id)
+                                        : selectedWorkspaceSettings.enabledTypes.filter((type) => type !== template.id);
+                                      updateSelectedWorkspaceSettings({
+                                        ...selectedWorkspaceSettings,
+                                        defaultType: enabledTypes.includes(selectedWorkspaceSettings.defaultType) ? selectedWorkspaceSettings.defaultType : (enabledTypes[0] || template.id),
+                                        enabledTypes: enabledTypes.length > 0 ? enabledTypes : [template.id],
+                                      });
+                                    }}
+                                  />
+                                  <span>{template.label}</span>
+                                </label>
+                              );
+                            })}
+                          </div>
+                        </div>
+                        <label className="gm-setting-row">
+                          <span>
+                            <strong>Access mode</strong>
+                            <small>Controls how GoMental should treat local edits for this workspace.</small>
+                          </span>
+                          <select
+                            value={selectedWorkspaceSettings.accessMode}
+                            onChange={(event) => updateSelectedWorkspaceSettings({
+                              ...selectedWorkspaceSettings,
+                              accessMode: event.target.value as 'editable' | 'readOnlyLocal' | 'readOnlyGit',
+                            })}
+                          >
+                            <option value="editable">Editable</option>
+                            <option value="readOnlyLocal">Read-only local</option>
+                            <option value="readOnlyGit">Read-only git connected</option>
+                          </select>
+                        </label>
+                        {selectedWorkspaceSettings.accessMode === 'readOnlyGit' && (
+                          <label className="gm-setting-row">
+                            <span>
+                              <strong>Git URL</strong>
+                              <small>Remote repository used for read-only git-connected workspaces.</small>
+                            </span>
+                            <input
+                              type="url"
+                              value={selectedWorkspaceSettings.gitUrl}
+                              placeholder="https://github.com/org/wiki.git"
+                              onChange={(event) => updateSelectedWorkspaceSettings({
+                                ...selectedWorkspaceSettings,
+                                gitUrl: event.target.value,
+                              })}
+                            />
+                          </label>
+                        )}
+                      </>
+                    ) : (
+                      <div className="gm-workspace-empty gm-workspace-empty-large">Choose or browse for a workspace to configure it.</div>
+                    )}
+                  </div>
+                </div>
+              </SettingsGroup>
+            )}
           </section>
         </div>
       </div>
@@ -2059,12 +2377,14 @@ function SearchResultsList({
   query,
   error,
   onOpen,
+  onToggleFavorite,
 }: {
   results: application.SearchResultDTO[];
   status: SearchStatus;
   query: string;
   error: string;
   onOpen: (id: string) => void;
+  onToggleFavorite: (id: string, favorite: boolean) => void;
 }) {
   if (status === 'searching') {
     return <div className="gm-result-label">Searching…</div>;
@@ -2080,6 +2400,29 @@ function SearchResultsList({
           <div className="gm-result-head">
             <span className="gm-result-title">{result.title || basename(result.id) || result.id}</span>
             <span className="gm-result-path">{result.path || result.id}</span>
+            <span
+              role="button"
+              tabIndex={0}
+              className={result.favorite ? 'gm-star gm-star-active' : 'gm-star'}
+              title={result.favorite ? 'Remove from favorites' : 'Add to favorites'}
+              aria-label={result.favorite ? 'Remove from favorites' : 'Add to favorites'}
+              aria-pressed={Boolean(result.favorite)}
+              onClick={(event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                onToggleFavorite(result.id, !result.favorite);
+              }}
+              onKeyDown={(event) => {
+                if (event.key !== 'Enter' && event.key !== ' ') {
+                  return;
+                }
+                event.preventDefault();
+                event.stopPropagation();
+                onToggleFavorite(result.id, !result.favorite);
+              }}
+            >
+              <StarIcon size={14} filled={Boolean(result.favorite)} />
+            </span>
           </div>
           {searchSnippet(result) && <SearchSnippet fragment={searchSnippet(result)} />}
         </button>
@@ -2663,6 +3006,14 @@ function normalizeSettings(value: GoMentalSettings): GoMentalSettings {
     ? value.graphView.defaultMode
     : DEFAULT_SETTINGS.graphView.defaultMode;
   const defaultDepth = clamp(Number(value?.graphView?.defaultDepth) || DEFAULT_SETTINGS.graphView.defaultDepth, 1, 4);
+  const workspaces: Record<string, GoMentalWorkspaceSettings> = {};
+  for (const [path, workspaceSettings] of Object.entries(value?.workspaces || {})) {
+    const trimmedPath = path.trim();
+    if (!trimmedPath) {
+      continue;
+    }
+    workspaces[trimmedPath] = normalizeWorkspaceSettings(workspaceSettings);
+  }
   return {
     version: 1,
     appearance: {theme},
@@ -2674,7 +3025,63 @@ function normalizeSettings(value: GoMentalSettings): GoMentalSettings {
       defaultMode,
       defaultDepth,
     },
+    workspaces,
   };
+}
+
+function knownWorkspacePaths(settings: GoMentalSettings, recent: application.RecentWorkspaceDTO[], currentWorkspace: string): string[] {
+  const paths: string[] = [];
+  const add = (path: string) => {
+    const trimmed = path.trim();
+    if (trimmed && !paths.some((item) => item.toLocaleLowerCase() === trimmed.toLocaleLowerCase())) {
+      paths.push(trimmed);
+    }
+  };
+  add(currentWorkspace);
+  recent.forEach((item) => add(item.path || ''));
+  Object.keys(settings.workspaces || {}).forEach(add);
+  return paths;
+}
+
+function workspaceSettingsFor(settings: GoMentalSettings, path: string): GoMentalWorkspaceSettings {
+  return normalizeWorkspaceSettings(settings.workspaces?.[path] || defaultWorkspaceSettings());
+}
+
+function workspaceIsReadOnly(settings: GoMentalSettings, path: string): boolean {
+  return Boolean(path && workspaceSettingsFor(settings, path).accessMode !== 'editable');
+}
+
+function defaultWorkspaceSettings(): GoMentalWorkspaceSettings {
+  return {
+    defaultType: 'concept',
+    enabledTypes: NOTE_TEMPLATE_OPTIONS.map((template) => template.id),
+    accessMode: 'editable',
+    gitUrl: '',
+  };
+}
+
+function normalizeWorkspaceSettings(value: GoMentalWorkspaceSettings): GoMentalWorkspaceSettings {
+  const defaults = defaultWorkspaceSettings();
+  const templateIDs = new Set(NOTE_TEMPLATE_OPTIONS.map((template) => template.id));
+  const enabledTypes = Array.from(new Set((value?.enabledTypes || []).filter((type) => templateIDs.has(type as NoteTemplateID))));
+  const defaultType = templateIDs.has(value?.defaultType as NoteTemplateID)
+    ? value.defaultType
+    : defaults.defaultType;
+  const normalizedEnabledTypes = enabledTypes.length > 0 ? enabledTypes : [...defaults.enabledTypes];
+  const ensuredEnabledTypes = ensureEnabledType(normalizedEnabledTypes, defaultType);
+  const accessMode = value?.accessMode === 'readOnlyLocal' || value?.accessMode === 'readOnlyGit' || value?.accessMode === 'editable'
+    ? value.accessMode
+    : defaults.accessMode;
+  return {
+    defaultType,
+    enabledTypes: ensuredEnabledTypes,
+    accessMode,
+    gitUrl: accessMode === 'readOnlyGit' ? (value?.gitUrl || '').trim() : '',
+  };
+}
+
+function ensureEnabledType(enabledTypes: string[], type: string): string[] {
+  return enabledTypes.includes(type) ? enabledTypes : [type, ...enabledTypes];
 }
 
 // Left-pane sizing: the grid's base sidebar column is 290px; the pane is

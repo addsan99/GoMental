@@ -12,6 +12,17 @@ let reconnectTimer: ReturnType<typeof setTimeout> | null = null
 let backoff = 1000
 const maxBackoff = 30000
 
+function serverBasePath(): string {
+  if (typeof window === 'undefined') {
+    return ''
+  }
+  const [first] = window.location.pathname.split('/').filter(Boolean)
+  if (!first || first === 'api' || first === 'mcp') {
+    return ''
+  }
+  return `/${first}`
+}
+
 function attachListener(name: string) {
   if (!source || wrappers.has(name)) {
     return
@@ -40,7 +51,7 @@ function connect() {
   if (source || typeof EventSource === 'undefined') {
     return
   }
-  const opened = new EventSource('/api/events')
+  const opened = new EventSource(`${serverBasePath()}/api/events`)
   source = opened
   opened.onopen = () => {
     backoff = 1000
