@@ -85,6 +85,7 @@ type execRunner struct {
 
 func (r execRunner) Run(ctx context.Context, dir string, args ...string) (string, error) {
 	cmd := exec.CommandContext(ctx, "git", args...)
+	configureGitCommand(cmd)
 	if dir != "" {
 		cmd.Dir = dir
 	}
