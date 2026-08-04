@@ -198,6 +198,39 @@ func (m *WritableManager) CommitAndPush(ctx context.Context, message string, pat
 	return CommitResult{Committed: true, Pushed: true, Commit: m.status.Commit}, nil
 }
 
+func (m *WritableManager) CommitAll(ctx context.Context, message string) (CommitResult, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.status.Syncing = true
+	defer func() { m.status.Syncing = false }()
+
+	args := append([]string{"add", "-A", "--", "."}, metadataExcludePathspecs(m.cfg.MetadataDir)...)
+	if _, err := m.cfg.Runner.Run(ctx, m.cfg.Dir, args...); err != nil {
+		return CommitResult{}, m.fail(fmt.Errorf("gitsync writable: stage workspace changes: %w", err))
+	}
+	statusArgs := append([]string{"status", "--porcelain", "--", "."}, metadataExcludePathspecs(m.cfg.MetadataDir)...)
+	out, err := m.cfg.Runner.Run(ctx, m.cfg.Dir, statusArgs...)
+	if err != nil {
+		return CommitResult{}, m.fail(fmt.Errorf("gitsync writable: inspect workspace changes: %w", err))
+	}
+	if strings.TrimSpace(out) == "" {
+		m.refreshLocked(ctx)
+		return CommitResult{Commit: m.status.Commit}, nil
+	}
+	if strings.TrimSpace(message) == "" {
+		message = "Update workspace from GoMental"
+	}
+	if _, err := m.cfg.Runner.Run(ctx, m.cfg.Dir, "commit", "-m", message); err != nil {
+		return CommitResult{}, m.fail(fmt.Errorf("gitsync writable: commit workspace changes: %w", err))
+	}
+	head, err := m.cfg.Runner.Run(ctx, m.cfg.Dir, "rev-parse", "HEAD")
+	if err != nil {
+		return CommitResult{}, m.fail(fmt.Errorf("gitsync writable: read commit: %w", err))
+	}
+	m.refreshLocked(ctx)
+	return CommitResult{Committed: true, Commit: short(strings.TrimSpace(head))}, nil
+}
+
 func (m *WritableManager) OpenPullRequest(ctx context.Context, title, body string) (PullRequestResult, error) {
 	return m.createOrMergePullRequest(ctx, title, body, false)
 }
@@ -216,6 +249,9 @@ func (m *WritableManager) createOrMergePullRequest(ctx context.Context, title, b
 	}
 	if strings.TrimSpace(title) == "" {
 		title = "Update GoMental workspace"
+	}
+	if _, err := m.CommitAll(ctx, "Update workspace from GoMental"); err != nil {
+		return PullRequestResult{}, m.fail(err)
 	}
 	if err := m.pushBranch(ctx); err != nil {
 		return PullRequestResult{}, m.fail(fmt.Errorf("gitsync writable: push branch before pull request: %w", err))

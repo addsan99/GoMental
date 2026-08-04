@@ -124,6 +124,50 @@ func TestWritableCommitAndPushStagesOnlyGivenPaths(t *testing.T) {
 	}
 }
 
+func TestWritableCommitAllIncludesExternalNotes(t *testing.T) {
+	requireGit(t)
+	remote := makeRemote(t)
+	dir := filepath.Join(t.TempDir(), "clone")
+
+	m, err := NewWritable(WritableConfig{
+		Remote: remote,
+		Branch: "gomental/test-machine/wiki",
+		Dir:    dir,
+	})
+	if err != nil {
+		t.Fatalf("NewWritable: %v", err)
+	}
+	if err := m.Ensure(context.Background()); err != nil {
+		t.Fatalf("Ensure: %v", err)
+	}
+
+	writeFile(t, filepath.Join(dir, "copied", "note.md"), "# Copied note\n")
+	writeFile(t, filepath.Join(dir, ".workspace", "graph.sqlite"), "derived\n")
+	res, err := m.CommitAll(context.Background(), "Add externally copied notes")
+	if err != nil {
+		t.Fatalf("CommitAll: %v", err)
+	}
+	if !res.Committed {
+		t.Fatalf("result = %#v, want committed", res)
+	}
+	if err := m.pushBranch(context.Background()); err != nil {
+		t.Fatalf("pushBranch: %v", err)
+	}
+
+	check := filepath.Join(t.TempDir(), "check")
+	git(t, "", "clone", "--branch", "gomental/test-machine/wiki", remote, check)
+	data, err := os.ReadFile(filepath.Join(check, "copied", "note.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.ReplaceAll(string(data), "\r\n", "\n") != "# Copied note\n" {
+		t.Fatalf("copied note = %q", data)
+	}
+	if _, err := os.Stat(filepath.Join(check, ".workspace", "graph.sqlite")); !os.IsNotExist(err) {
+		t.Fatalf(".workspace file should not be pushed, stat err=%v", err)
+	}
+}
+
 func TestWritableOpenPullRequestPushesBranchFirst(t *testing.T) {
 	requireGit(t)
 	remote := makeRemote(t)
@@ -162,6 +206,7 @@ func TestWritableOpenPullRequestPushesBranchFirst(t *testing.T) {
 	if err := m.Ensure(context.Background()); err != nil {
 		t.Fatalf("Ensure: %v", err)
 	}
+	writeFile(t, filepath.Join(dir, "copied.md"), "# Copied through filesystem\n")
 	m.cfg.Remote = "https://github.com/acme/wiki.git"
 	m.status.Remote = m.cfg.Remote
 	if _, err := m.OpenPullRequest(context.Background(), "Update", "Body"); err != nil {
@@ -172,6 +217,9 @@ func TestWritableOpenPullRequestPushesBranchFirst(t *testing.T) {
 	}
 	check := filepath.Join(t.TempDir(), "check")
 	git(t, "", "clone", "--branch", "gomental/test-machine/wiki", remote, check)
+	if _, err := os.Stat(filepath.Join(check, "copied.md")); err != nil {
+		t.Fatalf("externally copied note should be pushed before PR: %v", err)
+	}
 }
 
 func TestParseGitHubRepo(t *testing.T) {
