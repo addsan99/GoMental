@@ -570,6 +570,12 @@ function App() {
       showToast('Pulled latest from git');
       void refreshInfo();
     });
+    const offGitStatus = onEvent('git:status', (payload: AppInfoWithMode['git']) => {
+      if (!payload) {
+        return;
+      }
+      setInfo((prev) => ({...prev, git: {...(prev.git ?? payload), ...payload}}));
+    });
     const offGitPushed = onEvent('git:pushed', () => {
       showToast('Pushed branch to git');
       void refreshInfo();
@@ -594,6 +600,7 @@ function App() {
       offDeleted();
       offGraph();
       offGitSynced();
+      offGitStatus();
       offGitPushed();
       offGitPr();
       offGitMerged();
@@ -1395,8 +1402,14 @@ function App() {
             disabled={git.syncing}
           >
             <span className={git.syncing ? 'gm-git-dot gm-git-dot-syncing' : 'gm-git-dot'} />
-            <span className="gm-git-ref">{git.ref}</span>
-            <span className="gm-git-commit">{shortCommit(git.commit)}</span>
+            {git.syncing && git.operation ? (
+              <span className="gm-git-operation">{git.operation}</span>
+            ) : (
+              <>
+                <span className="gm-git-ref">{git.ref}</span>
+                <span className="gm-git-commit">{shortCommit(git.commit)}</span>
+              </>
+            )}
           </button>
         )}
         {git && writableGit && (
@@ -1408,9 +1421,15 @@ function App() {
               disabled={git.syncing}
             >
               <span className={git.syncing ? 'gm-git-dot gm-git-dot-syncing' : 'gm-git-dot'} />
-              <span className="gm-git-ref">{git.branch || git.ref}</span>
-              <span className="gm-git-commit">{shortCommit(git.commit)}</span>
-              {typeof git.ahead === 'number' && git.ahead > 0 && <span className="gm-git-ahead">+{git.ahead}</span>}
+              {git.syncing && git.operation ? (
+                <span className="gm-git-operation">{git.operation}</span>
+              ) : (
+                <>
+                  <span className="gm-git-ref">{git.branch || git.ref}</span>
+                  <span className="gm-git-commit">{shortCommit(git.commit)}</span>
+                  {typeof git.ahead === 'number' && git.ahead > 0 && <span className="gm-git-ahead">+{git.ahead}</span>}
+                </>
+              )}
             </button>
             <button type="button" className="gm-btn gm-btn-ghost gm-btn-sm" onClick={openGitPr} disabled={git.syncing}>
               PR
@@ -2859,8 +2878,11 @@ function shortCommit(commit: string): string {
 
 // Build the git status chip's hover title from lastSyncAt / lastError, so the
 // unobtrusive chip carries the full sync state on hover.
-function gitChipTitle(git: {remote: string; ref: string; commit: string; lastSyncAt?: string | null; lastError?: string}): string {
+function gitChipTitle(git: {remote: string; ref: string; commit: string; lastSyncAt?: string | null; lastError?: string; operation?: string}): string {
   const lines = [`${git.remote}`, `${git.ref} @ ${git.commit || '(not yet cloned)'}`];
+  if (git.operation) {
+    lines.push(git.operation);
+  }
   if (git.lastSyncAt) {
     lines.push(`Last synced ${relativeTime(git.lastSyncAt)}`);
   }

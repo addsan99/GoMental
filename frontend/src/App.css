@@ -371,6 +371,13 @@ body.gm-resizing * { cursor: col-resize !important; }
 [data-theme="dark"] .gm-git-chip-error { border-color: #f0a08c; color: #f0a08c; }
 .gm-git-ref { font-weight: 600; }
 .gm-git-commit { font: 400 11.5px/1 var(--font-mono); color: var(--text-3); }
+.gm-git-operation {
+  max-width: 210px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 650;
+}
 .gm-git-dot {
   width: 7px; height: 7px; border-radius: 9999px; flex: none;
   background: var(--good); box-shadow: 0 0 0 3px var(--good-soft);

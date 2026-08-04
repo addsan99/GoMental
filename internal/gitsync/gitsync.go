@@ -66,6 +66,7 @@ type Status struct {
 	LastSyncAt *time.Time
 	LastError  string
 	Syncing    bool
+	Operation  string
 }
 
 // Manager holds the frozen config plus a mutex-guarded last Status. All git
@@ -215,9 +216,13 @@ func (m *Manager) Sync(ctx context.Context) (Result, error) {
 	defer m.mu.Unlock()
 
 	m.status.Syncing = true
-	// Snapshot cannot show Syncing=true to other goroutines while we hold the
-	// lock (Status() also takes m.mu), but we clear it before returning anyway.
-	defer func() { m.status.Syncing = false }()
+	m.status.Operation = "Syncing local notes from git"
+	m.notifyStatusLocked()
+	defer func() {
+		m.status.Syncing = false
+		m.status.Operation = ""
+		m.notifyStatusLocked()
+	}()
 
 	res := Result{}
 
@@ -296,6 +301,17 @@ func (m *Manager) Status() Status {
 		s.LastSyncAt = &t
 	}
 	return s
+}
+
+func (m *Manager) notifyStatusLocked() {
+	m.notify("git:status", map[string]any{
+		"remote":    m.status.Remote,
+		"ref":       m.status.Ref,
+		"commit":    m.status.Commit,
+		"lastError": m.status.LastError,
+		"syncing":   m.status.Syncing,
+		"operation": m.status.Operation,
+	})
 }
 
 // RunPoll drives Sync on a ticker until ctx is done. interval<=0 returns

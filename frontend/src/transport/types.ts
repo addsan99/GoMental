@@ -22,6 +22,7 @@ export type GitStatusInfo = {
   lastPushedAt?: string | null
   lastError?: string
   syncing?: boolean
+  operation?: string
 }
 
 // AppInfo plus the `mode`/`workspace` fields the HTTP `/api/info` handler adds
