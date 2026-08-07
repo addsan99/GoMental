@@ -67,9 +67,13 @@ var metadataFacets = []Facet{
 		Values: func(n domain.ParsedOKFNote) []string {
 			var out []string
 			seen := map[string]struct{}{}
+			titleKey := headingTextKey(n.Title)
 			for _, h := range n.Headings {
 				key := headingKey(h) // lowercased, matches sharedHeadings semantics
 				if key == "" {
+					continue
+				}
+				if key == titleKey {
 					continue
 				}
 				if _, ok := seen[key]; ok {
@@ -108,6 +112,19 @@ func edgeKindForStrength(s domain.LinkStrength) domain.GraphEdgeKind {
 		}
 	}
 	return domain.GraphEdgeInferredRelatedTo
+}
+
+func metadataStrengthForHub(id string) (domain.LinkStrength, bool) {
+	for _, f := range metadataFacets {
+		if strings.HasPrefix(id, f.Prefix) {
+			return f.Strength, true
+		}
+	}
+	return "", false
+}
+
+func isTitleHeadingHub(target, title string) bool {
+	return title != "" && target == "heading:"+headingTextKey(title)
 }
 
 // hubNodeKind classifies a hub node id by its facet prefix, returning the node

@@ -144,6 +144,7 @@ const NODE_RENDER_CAP = 2500;
 const AGGREGATE_THRESHOLD = 1500;
 // Which facet axis a group-by drills into when an aggregate super-node is clicked.
 const GROUPBY_AXIS: Record<string, 'types' | 'tags' | 'folders'> = {type: 'types', tag: 'tags', folder: 'folders'};
+const HUB_FACET_AXIS: Record<string, 'types' | 'tags'> = {type: 'types', tag: 'tags'};
 
 export function GraphView3D({
   workspaceOpen,
@@ -194,6 +195,7 @@ export function GraphView3D({
     ...defaultGraphViewState(),
     seed: selectedID || undefined,
   }));
+  const [graphFocusID, setGraphFocusID] = useState(selectedID || '');
   const followSelectionRef = useRef(true);
 
   // Link types drive both the query (which edges to fetch) and client visibility.
@@ -239,6 +241,7 @@ export function GraphView3D({
   const searchActiveRef = useRef(searchActive);
   const focusMatchesRef = useRef(focusMatches);
   const selectedIDRef = useRef(selectedID);
+  const graphFocusIDRef = useRef(graphFocusID);
   const flatRef = useRef(flat);
   const viewStateRef = useRef(viewState);
   const notesByIdRef = useRef(notesById);
@@ -250,6 +253,7 @@ export function GraphView3D({
   searchActiveRef.current = searchActive;
   focusMatchesRef.current = focusMatches;
   selectedIDRef.current = selectedID;
+  graphFocusIDRef.current = graphFocusID;
   flatRef.current = flat;
   viewStateRef.current = viewState;
   notesByIdRef.current = notesById;
@@ -401,7 +405,7 @@ export function GraphView3D({
       if (requestRef.current !== requestID) {
         return;
       }
-      const builtFull = buildData(dto, selectedIDRef.current, flat);
+      const builtFull = buildData(dto, graphFocusIDRef.current, flat);
       // A large, unfocused graph collapses into a group-level overview; otherwise
       // it's bounded by the render cap. Both keep the sim responsive at scale.
       let built: GraphData;
@@ -410,7 +414,7 @@ export function GraphView3D({
         built = aggregateGraph(builtFull, vs.groupBy, notesByIdRef.current);
         setAggregatedGroups(built.nodes.length);
       } else {
-        const capped = capGraph(builtFull, NODE_RENDER_CAP, selectedIDRef.current);
+        const capped = capGraph(builtFull, NODE_RENDER_CAP, graphFocusIDRef.current);
         built = capped.data;
         hidden = capped.hidden;
         setAggregatedGroups(0);
@@ -449,6 +453,7 @@ export function GraphView3D({
       JSON.stringify({
         ws: workspaceOpen,
         seed: viewState.seed ?? '',
+        metadataSeed: viewState.metadataSeed ?? '',
         depth,
         types: viewState.facets.types,
         tags: viewState.facets.tags,
@@ -458,7 +463,7 @@ export function GraphView3D({
         soft: linkTypes.soft,
         meta: linkTypes.metadata,
       }),
-    [workspaceOpen, viewState.seed, depth, viewState.facets, viewState.includeUnresolved, linkTypes.soft, linkTypes.metadata],
+    [workspaceOpen, viewState.seed, viewState.metadataSeed, depth, viewState.facets, viewState.includeUnresolved, linkTypes.soft, linkTypes.metadata],
   );
 
   // Seed tracks the app selection unless a lens has pinned/cleared it.
@@ -467,7 +472,8 @@ export function GraphView3D({
       return;
     }
     const next = selectedID || undefined;
-    setViewState((state) => (state.seed === next ? state : {...state, seed: next}));
+    setGraphFocusID(selectedID || '');
+    setViewState((state) => (state.seed === next && !state.metadataSeed ? state : {...state, seed: next, metadataSeed: undefined}));
   }, [selectedID]);
 
   // Facets are owned by App (shared with the note-list filter). Mirror the prop
@@ -643,7 +649,7 @@ export function GraphView3D({
           radialSeedRef.current.fx = undefined;
           radialSeedRef.current.fy = undefined;
         }
-        const seedId = viewState.seed;
+        const seedId = graphFocusID;
         const seed =
           data.nodes.find((n) => n.selected) ??
           (seedId ? data.nodes.find((n) => n.noteId === seedId || n.id === seedId) : undefined);
@@ -684,7 +690,7 @@ export function GraphView3D({
     applyLayout();
     const raf = requestAnimationFrame(applyLayout);
     return () => cancelAnimationFrame(raf);
-  }, [viewState.layout, viewState.groupBy, viewState.seed, data, nodeDistance, status, flat, notesById]);
+  }, [viewState.layout, viewState.groupBy, viewState.seed, graphFocusID, data, nodeDistance, status, flat, notesById]);
 
   // Node spacing (live-sim layouts): scale the charge/link forces by the Distance
   // slider and reheat so the layout respreads. The zoned layout is deterministic
@@ -832,7 +838,7 @@ export function GraphView3D({
     }
     let target: GraphNode | undefined;
     for (const node of data.nodes) {
-      const isSelected = Boolean(selectedID) && (node.noteId ? node.noteId === selectedID : node.id === selectedID);
+      const isSelected = Boolean(graphFocusID) && (node.id === graphFocusID || node.noteId === graphFocusID);
       node.selected = isSelected;
       if (isSelected) {
         target = node;
@@ -840,18 +846,18 @@ export function GraphView3D({
     }
     selectedGraphIdRef.current = target?.id ?? null;
     fgRef.current?.refresh();
-    if (!selectedID) {
+    if (!graphFocusID) {
       centeredSelectionRef.current = '';
       return;
     }
     // Fly only when the selection actually changed, not on every reload re-settle.
-    if (selectedID !== centeredSelectionRef.current) {
-      centeredSelectionRef.current = selectedID;
+    if (graphFocusID !== centeredSelectionRef.current) {
+      centeredSelectionRef.current = graphFocusID;
       if (target) {
         flyTo(target as FGNode, 300);
       }
     }
-  }, [selectedID, data, status, flyTo]);
+  }, [graphFocusID, data, status, flyTo]);
 
   // Frame the view ONCE per load — never on a slider/layout tweak (those don't
   // change `data`, so this effect doesn't re-run for them). warmupTicks pre-settles
@@ -863,8 +869,8 @@ export function GraphView3D({
     if (status !== 'ready' || !framePendingRef.current) {
       return;
     }
-    const hasSelection = Boolean(selectedIDRef.current)
-      && data.nodes.some((n) => (n.noteId ? n.noteId === selectedIDRef.current : n.id === selectedIDRef.current));
+    const hasSelection = Boolean(graphFocusIDRef.current)
+      && data.nodes.some((n) => n.id === graphFocusIDRef.current || n.noteId === graphFocusIDRef.current);
     if (hasSelection) {
       framePendingRef.current = false;
       return;
@@ -964,16 +970,48 @@ export function GraphView3D({
     onFacetsChange({...viewStateRef.current.facets, [axis]: [...current, key]});
   }, [onFacetsChange]);
 
+  const drillIntoHub = useCallback((node: FGNode): boolean => {
+    const axis = HUB_FACET_AXIS[node.kind];
+    if (!axis) {
+      return false;
+    }
+    const value = hubFacetValue(node.id);
+    if (!value) {
+      return false;
+    }
+    const facets: FacetFilter = {types: [], tags: [], folders: [], favorites: false};
+    facets[axis] = [value];
+    followSelectionRef.current = false;
+    setGraphFocusID(node.id);
+    setLinkTypes((current) => (current.metadata ? current : {...current, metadata: true}));
+    setViewState((state) => ({
+      ...state,
+      seed: undefined,
+      metadataSeed: node.id,
+      layout: 'radial',
+      facets,
+    }));
+    onFacetsChange(facets);
+    return true;
+  }, [onFacetsChange]);
+
   const selectNode = useCallback((node: FGNode) => {
     if (node.kind === 'aggregate') {
       drillIntoAggregate(node.id);
       return;
     }
+    if (drillIntoHub(node)) {
+      flyTo(node, 300);
+      return;
+    }
     if (node.noteId) {
+      setGraphFocusID(node.id);
+      followSelectionRef.current = true;
       onSelectNote(node.noteId);
+      setViewState((state) => (state.metadataSeed ? {...state, metadataSeed: undefined} : state));
     }
     flyTo(node, 300);
-  }, [onSelectNote, flyTo, drillIntoAggregate]);
+  }, [onSelectNote, flyTo, drillIntoAggregate, drillIntoHub]);
 
   const openNode = useCallback((node: FGNode) => {
     if (node.noteId) {
@@ -1249,7 +1287,7 @@ export function GraphView3D({
             ) : (
               <>
                 <LegendDot color={nodeColor('note', true)} label="Selected" />
-                {selectedID ? (
+                {graphFocusID ? (
                   <>
                     <LegendDot color={depthShade(1, theme)} label="Near the focus" />
                     <LegendDot color={depthShade(MAX_DEPTH_HOPS, theme)} label="Farther out" />
@@ -1435,18 +1473,23 @@ function endId(end: unknown): string {
   return typeof end === 'object' && end ? (end as {id: string}).id : String(end);
 }
 
+function hubFacetValue(id: string): string {
+  const index = id.indexOf(':');
+  return index >= 0 ? id.slice(index + 1) : '';
+}
+
 // Cap the rendered graph to the most-connected nodes so a very large query still
 // renders smoothly. The selected node is always kept; the rest are filled by
 // descending degree (so hubs survive). Returns the trimmed graph plus how many
 // nodes were dropped, for the "N more" badge.
-function capGraph(data: GraphData, cap: number, selectedID: string): {data: GraphData; hidden: number} {
+function capGraph(data: GraphData, cap: number, selectedGraphID: string): {data: GraphData; hidden: number} {
   if (data.nodes.length <= cap) {
     return {data, hidden: 0};
   }
   const keep = new Set<string>();
-  if (selectedID) {
+  if (selectedGraphID) {
     for (const node of data.nodes) {
-      if ((node.noteId ? node.noteId === selectedID : node.id === selectedID)) {
+      if (node.id === selectedGraphID || node.noteId === selectedGraphID) {
         keep.add(node.id);
       }
     }

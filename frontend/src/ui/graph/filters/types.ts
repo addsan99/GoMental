@@ -14,6 +14,7 @@ export interface FacetFilter {
 
 export interface GraphViewState {
   seed?: string // focus note id (undefined = no focus)
+  metadataSeed?: string // focus metadata hub id (e.g. tag:go)
   depth: number // 1..3
   facets: FacetFilter
   includeSoftLinks: boolean

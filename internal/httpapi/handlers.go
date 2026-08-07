@@ -398,3 +398,49 @@ func (s *Server) handleSaveSettings(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "saved"})
 }
+
+func (s *Server) handleListNoteTypes(w http.ResponseWriter, r *http.Request) {
+	types, err := s.service().ListNoteTypes(r.Context())
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, types)
+}
+
+func (s *Server) handleImportNoteTypeCollection(w http.ResponseWriter, r *http.Request) {
+	var request struct {
+		Content string `json:"content"`
+	}
+	if !decodeJSON(w, r, &request) {
+		return
+	}
+	types, err := s.service().ImportNoteTypeCollection(r.Context(), request.Content)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, types)
+}
+
+func (s *Server) handleSaveNoteType(w http.ResponseWriter, r *http.Request) {
+	var definition application.NoteTypeDTO
+	if !decodeJSON(w, r, &definition) {
+		return
+	}
+	definition.ID = r.PathValue("id")
+	saved, err := s.service().SaveNoteType(r.Context(), definition)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, saved)
+}
+
+func (s *Server) handleDeleteNoteType(w http.ResponseWriter, r *http.Request) {
+	if err := s.service().DeleteNoteType(r.Context(), r.PathValue("id")); err != nil {
+		writeError(w, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}

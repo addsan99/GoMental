@@ -503,7 +503,17 @@ func (s *SQLiteStore) FullGraph(ctx context.Context, filter domain.GraphFilter) 
 func (s *SQLiteStore) Query(ctx context.Context, q domain.GraphQuery) (domain.Graph, error) {
 	// Reachable node-id set for a seeded neighborhood; nil means "full graph".
 	var frontier map[string]struct{}
-	if q.Seed != nil {
+	if q.MetadataSeed != "" {
+		depth := q.Depth
+		if depth <= 0 {
+			depth = 1
+		}
+		f, err := s.metadataFrontier(ctx, q.MetadataSeed, depth, q.IncludeSoftLinks)
+		if err != nil {
+			return domain.Graph{}, err
+		}
+		frontier = f
+	} else if q.Seed != nil {
 		depth := q.Depth
 		if depth <= 0 {
 			depth = 1
@@ -552,6 +562,61 @@ frontier(node, d) AS (
 )
 SELECT DISTINCT node FROM frontier`
 	args := append(append([]any{}, strengths...), seed, depth)
+	rows, err := s.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	set := map[string]struct{}{}
+	for rows.Next() {
+		var node string
+		if err := rows.Scan(&node); err != nil {
+			return nil, err
+		}
+		set[node] = struct{}{}
+	}
+	return set, rows.Err()
+}
+
+// metadataFrontier returns notes around a metadata hub. Depth 1 is every note
+// directly attached to the hub; larger depths traverse hard/soft note links
+// outward from those notes. Metadata hubs seed the view but are not traversed.
+func (s *SQLiteStore) metadataFrontier(ctx context.Context, seed string, depth int, includeSoft bool) (map[string]struct{}, error) {
+	strength, ok := metadataStrengthForHub(seed)
+	if !ok {
+		return map[string]struct{}{}, nil
+	}
+	if depth <= 0 {
+		depth = 1
+	}
+	strengths := []any{string(domain.LinkStrengthHard)}
+	if includeSoft {
+		strengths = append(strengths, string(domain.LinkStrengthSoft))
+	}
+	ph := strings.TrimRight(strings.Repeat("?,", len(strengths)), ",")
+	query := `
+WITH seeds(node, d) AS (
+  SELECT source, 1
+  FROM links
+  WHERE target = ? AND strength = ?
+),
+edges_norm AS (
+  SELECT source AS src,
+         CASE WHEN resolved_id IS NOT NULL THEN resolved_id ELSE 'unresolved:' || target END AS dst
+  FROM links
+  WHERE strength IN (` + ph + `)
+),
+frontier(node, d) AS (
+  SELECT node, d FROM seeds
+  UNION
+  SELECT CASE WHEN e.src = f.node THEN e.dst ELSE e.src END, f.d + 1
+  FROM frontier f
+  JOIN edges_norm e ON (e.src = f.node OR e.dst = f.node)
+  WHERE f.d < ?
+)
+SELECT DISTINCT node FROM frontier`
+	args := append([]any{seed, string(strength)}, strengths...)
+	args = append(args, depth)
 	rows, err := s.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, err
@@ -641,7 +706,7 @@ func (s *SQLiteStore) selectedEdges(ctx context.Context, q domain.GraphQuery, ke
 		}
 	}
 	ph := strings.TrimRight(strings.Repeat("?,", len(strengths)), ",")
-	query := `SELECT source, target, resolved_id, strength, score FROM links WHERE strength IN (` + ph + `) ORDER BY source, target`
+	query := `SELECT source, target, resolved_id, strength, score, COALESCE((SELECT title FROM notes WHERE id = links.source), '') FROM links WHERE strength IN (` + ph + `) ORDER BY source, target`
 	rows, err := s.db.QueryContext(ctx, query, strengths...)
 	if err != nil {
 		return nil, err
@@ -649,10 +714,10 @@ func (s *SQLiteStore) selectedEdges(ctx context.Context, q domain.GraphQuery, ke
 	defer rows.Close()
 	var edges []domain.GraphEdge
 	for rows.Next() {
-		var source, target, strength string
+		var source, target, strength, sourceTitle string
 		var resolved sql.NullString
 		var score float64
-		if err := rows.Scan(&source, &target, &resolved, &strength, &score); err != nil {
+		if err := rows.Scan(&source, &target, &resolved, &strength, &score, &sourceTitle); err != nil {
 			return nil, err
 		}
 		if _, ok := keep[source]; !ok {
@@ -660,6 +725,12 @@ func (s *SQLiteStore) selectedEdges(ctx context.Context, q domain.GraphQuery, ke
 		}
 		ls := domain.LinkStrength(strength)
 		if ls.IsMetadata() {
+			if ls == domain.LinkStrengthHeading && isTitleHeadingHub(target, sourceTitle) {
+				continue
+			}
+			if q.MetadataSeed != "" && target != q.MetadataSeed {
+				continue
+			}
 			edges = append(edges, domain.GraphEdge{ID: fmt.Sprintf("%s|%s|%s", source, target, strength), Source: source, Target: target, Kind: edgeKindForStrength(ls), Score: score})
 			continue
 		}
@@ -885,7 +956,7 @@ func (s *SQLiteStore) allEdges(ctx context.Context, filter domain.GraphFilter) (
 	for _, strength := range strengths {
 		args = append(args, strength)
 	}
-	query := `SELECT source, target, resolved_id, strength, score FROM links WHERE strength IN (` + placeholders + `)`
+	query := `SELECT source, target, resolved_id, strength, score, COALESCE((SELECT title FROM notes WHERE id = links.source), '') FROM links WHERE strength IN (` + placeholders + `)`
 	if filter.PathPrefix != "" {
 		query += ` AND source LIKE ?`
 		args = append(args, filter.PathPrefix+"%")
@@ -901,16 +972,20 @@ func (s *SQLiteStore) allEdges(ctx context.Context, filter domain.GraphFilter) (
 	defer rows.Close()
 	var edges []domain.GraphEdge
 	for rows.Next() {
-		var source, target, strength string
+		var source, target, strength, sourceTitle string
 		var resolved sql.NullString
 		var score float64
-		if err := rows.Scan(&source, &target, &resolved, &strength, &score); err != nil {
+		if err := rows.Scan(&source, &target, &resolved, &strength, &score, &sourceTitle); err != nil {
 			return nil, err
 		}
-		if domain.LinkStrength(strength).IsMetadata() {
+		ls := domain.LinkStrength(strength)
+		if ls.IsMetadata() {
+			if ls == domain.LinkStrengthHeading && isTitleHeadingHub(target, sourceTitle) {
+				continue
+			}
 			// Metadata edges point at a facet hub key (e.g. "tag:go"); no resolution
 			// or unresolved rewrite — the target is the hub node id as stored.
-			edges = append(edges, domain.GraphEdge{ID: fmt.Sprintf("%s|%s|%s", source, target, strength), Source: source, Target: target, Kind: edgeKindForStrength(domain.LinkStrength(strength)), Score: score})
+			edges = append(edges, domain.GraphEdge{ID: fmt.Sprintf("%s|%s|%s", source, target, strength), Source: source, Target: target, Kind: edgeKindForStrength(ls), Score: score})
 			continue
 		}
 		graphTarget := target
@@ -922,7 +997,7 @@ func (s *SQLiteStore) allEdges(ctx context.Context, filter domain.GraphFilter) (
 			graphTarget = "unresolved:" + target
 		}
 		kind := domain.GraphEdgeLinksTo
-		if domain.LinkStrength(strength) == domain.LinkStrengthSoft {
+		if ls == domain.LinkStrengthSoft {
 			kind = domain.GraphEdgeInferredRelatedTo
 		}
 		edges = append(edges, domain.GraphEdge{ID: fmt.Sprintf("%s|%s|%s", source, graphTarget, strength), Source: source, Target: graphTarget, Kind: kind, Score: score})

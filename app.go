@@ -599,6 +599,46 @@ func (a *App) SaveSettings(settings application.Settings) error {
 	return a.service().SaveSettings(a.context(), settings)
 }
 
+func (a *App) ListNoteTypes() ([]application.NoteTypeDTO, error) {
+	return a.service().ListNoteTypes(a.context())
+}
+
+func (a *App) SaveNoteType(definition application.NoteTypeDTO) (application.NoteTypeDTO, error) {
+	if a.writesBlocked() {
+		return application.NoteTypeDTO{}, errReadOnly
+	}
+	saved, err := a.service().SaveNoteType(a.context(), definition)
+	if err != nil {
+		return application.NoteTypeDTO{}, err
+	}
+	return saved, a.commitWritableGit("Update note type "+saved.ID, filepath.Join(".gomental", "types", saved.ID+".yaml"))
+}
+
+func (a *App) DeleteNoteType(id string) error {
+	if a.writesBlocked() {
+		return errReadOnly
+	}
+	if err := a.service().DeleteNoteType(a.context(), id); err != nil {
+		return err
+	}
+	return a.commitWritableGit("Delete note type "+id, filepath.Join(".gomental", "types", id+".yaml"))
+}
+
+func (a *App) ImportNoteTypeCollection(content string) ([]application.NoteTypeDTO, error) {
+	if a.writesBlocked() {
+		return nil, errReadOnly
+	}
+	types, err := a.service().ImportNoteTypeCollection(a.context(), content)
+	if err != nil {
+		return nil, err
+	}
+	paths := make([]string, 0, len(types))
+	for _, definition := range types {
+		paths = append(paths, filepath.Join(".gomental", "types", definition.ID+".yaml"))
+	}
+	return types, a.commitWritableGit("Import note type collection", paths...)
+}
+
 // mustHost lazily constructs the desktop host (native dialogs enabled) on first use.
 func (a *App) mustHost() *apphost.Host {
 	a.mu.Lock()

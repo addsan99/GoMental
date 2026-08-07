@@ -4,8 +4,9 @@
   "version": "0.1.0",
   "type": "module",
   "scripts": {
-    "dev": "vite",
-    "build": "vite build",
+    "generate-themes": "node scripts/generate-vscode-themes.mjs",
+    "dev": "npm run generate-themes && vite",
+    "build": "npm run generate-themes && vite build",
     "typecheck": "tsc --noEmit",
     "lint": "tsc --noEmit",
     "preview": "vite preview"

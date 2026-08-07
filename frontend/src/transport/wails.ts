@@ -25,7 +25,7 @@ import {
   SelectWorkspaceDirectory,
 } from '../../wailsjs/go/main/App'
 import {EventsOn} from '../../wailsjs/runtime/runtime'
-import type {GitPRResult, GitSyncResult, GoMentalSettings, MoveNoteRequest, NoteDTOWithVersion, SaveNoteRequestWithVersion, SetNoteFavoriteRequest} from './types'
+import type {GitPRResult, GitSyncResult, GoMentalSettings, MoveNoteRequest, NoteDTOWithVersion, NoteType, SaveNoteRequestWithVersion, SetNoteFavoriteRequest} from './types'
 
 export {
   Backlinks,
@@ -114,6 +114,23 @@ export function SaveSettings(settings: GoMentalSettings): Promise<void> {
     return Promise.reject(new Error('settings are not available in this build'))
   }
   return app.SaveSettings(settings)
+}
+
+export function ListNoteTypes(): Promise<NoteType[]> {
+  const app = (window as any)?.go?.main?.App
+  return app?.ListNoteTypes ? app.ListNoteTypes() : Promise.reject(new Error('note types are not available in this build'))
+}
+export function SaveNoteType(definition: NoteType): Promise<NoteType> {
+  const app = (window as any)?.go?.main?.App
+  return app?.SaveNoteType ? app.SaveNoteType(definition) : Promise.reject(new Error('note types are not available in this build'))
+}
+export function DeleteNoteType(id: string): Promise<void> {
+  const app = (window as any)?.go?.main?.App
+  return app?.DeleteNoteType ? app.DeleteNoteType(id) : Promise.reject(new Error('note types are not available in this build'))
+}
+export function ImportNoteTypeCollection(content: string): Promise<NoteType[]> {
+  const app = (window as any)?.go?.main?.App
+  return app?.ImportNoteTypeCollection ? app.ImportNoteTypeCollection(content) : Promise.reject(new Error('note type collections are not available in this build'))
 }
 
 export function onEvent(name: string, cb: (...data: any[]) => void): () => void {

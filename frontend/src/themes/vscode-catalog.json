@@ -1,0 +1,522 @@
+[
+  {
+    "label": "Stellar Operator",
+    "category": "vs-dark",
+    "file": "stellar-operator-theme.json"
+  },
+  {
+    "label": "Cosmic Eclipse",
+    "category": "vs-dark",
+    "file": "cosmic-eclipse-theme.json"
+  },
+  {
+    "label": "Nebula Storm",
+    "category": "vs-dark",
+    "file": "nebula-storm-theme.json"
+  },
+  {
+    "label": "Ocean Depths",
+    "category": "vs-dark",
+    "file": "ocean-depths-theme.json"
+  },
+  {
+    "label": "Neo Hacker Soft - Premium",
+    "category": "vs-dark",
+    "file": "hacker-color-theme.json"
+  },
+  {
+    "label": "Blush Pink Enhanced Premium",
+    "category": "vs",
+    "file": "pink-color-theme.json"
+  },
+  {
+    "label": "Blue Theme",
+    "category": "vs-dark",
+    "file": "blue-color-theme.json"
+  },
+  {
+    "label": "Enhanced Dark Theme",
+    "category": "vs-dark",
+    "file": "dark-color-theme.json"
+  },
+  {
+    "label": "Nord Dark",
+    "category": "vs-dark",
+    "file": "nord-dark-theme.json"
+  },
+  {
+    "label": "Tokyo Night",
+    "category": "vs-dark",
+    "file": "tokyo-night-theme.json"
+  },
+  {
+    "label": "Dracula Pro",
+    "category": "vs-dark",
+    "file": "dracula-pro-theme.json"
+  },
+  {
+    "label": "Solarized Dark",
+    "category": "vs-dark",
+    "file": "solarized-dark-theme.json"
+  },
+  {
+    "label": "Gruvbox Dark",
+    "category": "vs-dark",
+    "file": "gruvbox-dark-theme.json"
+  },
+  {
+    "label": "Gentle Sepia",
+    "category": "vs",
+    "file": "gentle-sepia-theme.json"
+  },
+  {
+    "label": "LowBlue Night",
+    "category": "vs-dark",
+    "file": "low-blue-night-theme.json"
+  },
+  {
+    "label": "Soft Contrast",
+    "category": "vs",
+    "file": "soft-contrast-theme.json"
+  },
+  {
+    "label": "Dusky Rose Dark",
+    "category": "vs-dark",
+    "file": "dusky-rose-dark-theme.json"
+  },
+  {
+    "label": "High Readability Contrast",
+    "category": "vs-dark",
+    "file": "high-readability-contrast-theme.json"
+  },
+  {
+    "label": "One Dark Pro",
+    "category": "vs-dark",
+    "file": "one-dark-pro-theme.json"
+  },
+  {
+    "label": "Goku Code - Dragon Ball Z Power (Eye-Safe)",
+    "category": "vs-dark",
+    "file": "dragon-ball-z-goku-power-eye-safe-theme.json"
+  },
+  {
+    "label": "Ayu Mirage Comfort",
+    "category": "vs-dark",
+    "file": "ayu-mirage-comfort-theme.json"
+  },
+  {
+    "label": "Catppuccin Mocha Eye Care",
+    "category": "vs-dark",
+    "file": "catppuccin-mocha-eye-care-theme.json"
+  },
+  {
+    "label": "Eye Comfort Dark Pro",
+    "category": "vs-dark",
+    "file": "eye-comfort-dark-pro-theme.json"
+  },
+  {
+    "label": "Moonlight Soft",
+    "category": "vs-dark",
+    "file": "moonlight-soft-theme.json"
+  },
+  {
+    "label": "Night Owl Comfort",
+    "category": "vs-dark",
+    "file": "night-owl-comfort-theme.json"
+  },
+  {
+    "label": "Nebula Pro Dark",
+    "category": "vs-dark",
+    "file": "nebula-pro-dark-theme.json"
+  },
+  {
+    "label": "Rose Paradise",
+    "category": "vs",
+    "file": "rose-paradise-theme.json"
+  },
+  {
+    "label": "Omnitrix Code",
+    "category": "vs-dark",
+    "file": "omnitrix-code-theme.json"
+  },
+  {
+    "label": "Neon Dream Code",
+    "category": "vs-dark",
+    "file": "neon-dream-code-theme.json"
+  },
+  {
+    "label": "Eclipse Dark",
+    "category": "vs-dark",
+    "file": "eclipse-dark-theme.json"
+  },
+  {
+    "label": "Eclipse Light",
+    "category": "vs",
+    "file": "eclipse-light-theme.json"
+  },
+  {
+    "label": "Space Dark",
+    "category": "vs-dark",
+    "file": "space-dark-theme.json"
+  },
+  {
+    "label": "Space Light",
+    "category": "vs",
+    "file": "space-light-theme.json"
+  },
+  {
+    "label": "Cosmic Dark",
+    "category": "vs-dark",
+    "file": "cosmic-dark-theme.json"
+  },
+  {
+    "label": "Copper Dark",
+    "category": "vs-dark",
+    "file": "copper-dark-theme.json"
+  },
+  {
+    "label": "Aurora Borealis",
+    "category": "vs",
+    "file": "aurora-borealis-theme.json"
+  },
+  {
+    "label": "Midnight Frost",
+    "category": "vs-dark",
+    "file": "midnight-frost-theme.json"
+  },
+  {
+    "label": "Cyberpunk Neon",
+    "category": "vs-dark",
+    "file": "cyberpunk-neon-theme.json"
+  },
+  {
+    "label": "Ocean Breeze",
+    "category": "vs",
+    "file": "ocean-breeze-theme.json"
+  },
+  {
+    "label": "Neon Cyberpunk",
+    "category": "vs-dark",
+    "file": "neon-cyberpunk-theme.json"
+  },
+  {
+    "label": "Deep Space Dark",
+    "category": "vs-dark",
+    "file": "deep-space-dark-theme.json"
+  },
+  {
+    "label": "Deep Space Light",
+    "category": "vs",
+    "file": "deep-space-light-theme.json"
+  },
+  {
+    "label": "Pink Kitty Theme",
+    "category": "vs-dark",
+    "file": "pink-kitty-theme.json"
+  },
+  {
+    "label": "Japanese Wave",
+    "category": "vs-dark",
+    "file": "japanese-wave-theme.json"
+  },
+  {
+    "label": "Cosmic Console",
+    "category": "vs-dark",
+    "file": "cosmic-console-theme.json"
+  },
+  {
+    "label": "Midnight Glow",
+    "category": "vs-dark",
+    "file": "midnight-glow-theme.json"
+  },
+  {
+    "label": "Calm Dark",
+    "category": "vs-dark",
+    "file": "calm-dark-theme.json"
+  },
+  {
+    "label": "Calm Light",
+    "category": "vs",
+    "file": "calm-light-theme.json"
+  },
+  {
+    "label": "Pink Pixel Candy Nebula",
+    "category": "vs-dark",
+    "file": "pink-pixel-candy-nebula-theme.json"
+  },
+  {
+    "label": "Sugar Rush Dark",
+    "category": "vs-dark",
+    "file": "sugar-rush-dark-theme.json"
+  },
+  {
+    "label": "Pixel Lab Dark",
+    "category": "vs-dark",
+    "file": "pixel-lab-dark-theme.json"
+  },
+  {
+    "label": "Nimbus Mint Light",
+    "category": "vs",
+    "file": "nimbus-mint-light-theme.json"
+  },
+  {
+    "label": "CloudMint Night",
+    "category": "vs-dark",
+    "file": "cloudmint-night-theme.json"
+  },
+  {
+    "label": "Amber Light",
+    "category": "vs",
+    "file": "amber-light-theme.json"
+  },
+  {
+    "label": "Azure Dark HC",
+    "category": "hc-black",
+    "file": "azure-dark-hc-theme.json"
+  },
+  {
+    "label": "DarkRosebyte",
+    "category": "vs-dark",
+    "file": "darkrosebyte-theme.json"
+  },
+  {
+    "label": "Aurum Dusk",
+    "category": "vs-dark",
+    "file": "aurum-dusk-theme.json"
+  },
+  {
+    "label": "Emerald Matrix",
+    "category": "vs-dark",
+    "file": "emerald-matrix-theme.json"
+  },
+  {
+    "label": "EverNex",
+    "category": "vs-dark",
+    "file": "evernex-theme.json"
+  },
+  {
+    "label": "Lavender Glow",
+    "category": "vs",
+    "file": "lavender-glow-theme.json"
+  },
+  {
+    "label": "Midnight Abyss",
+    "category": "vs-dark",
+    "file": "midnight-abyss-theme.json"
+  },
+  {
+    "label": "Ocean Abyss",
+    "category": "hc-light",
+    "file": "ocean-abyss-theme.json"
+  },
+  {
+    "label": "Sky Breeze",
+    "category": "vs",
+    "file": "sky-breeze-theme.json"
+  },
+  {
+    "label": "Pastel Cyberwave",
+    "category": "vs-dark",
+    "file": "pastel-cyberwave-theme.json"
+  },
+  {
+    "label": "Neon Overdrive",
+    "category": "vs-dark",
+    "file": "neon-overdrive-theme.json"
+  },
+  {
+    "label": "Nutty Dark",
+    "category": "vs-dark",
+    "file": "nutty-dark-theme.json"
+  },
+  {
+    "label": "Nutty Light",
+    "category": "vs",
+    "file": "nutty-light-theme.json"
+  },
+  {
+    "label": "Dark Green Jungle",
+    "category": "vs-dark",
+    "file": "dark-green-jungle-theme.json"
+  },
+  {
+    "label": "Black and White TV",
+    "category": "vs-dark",
+    "file": "black-and-white-tv-theme.json"
+  },
+  {
+    "label": "Canvas Soft Light",
+    "category": "vs",
+    "file": "canvas-soft-light-theme.json"
+  },
+  {
+    "label": "Canvas Intelli",
+    "category": "vs",
+    "file": "canvas-intelli-theme.json"
+  },
+  {
+    "label": "CodeCanvas Light",
+    "category": "vs",
+    "file": "codecanvas-light-theme.json"
+  },
+  {
+    "label": "CodeCanvas Intelli Light",
+    "category": "vs",
+    "file": "codecanvas-intelli-light-theme.json"
+  },
+  {
+    "label": "Akari Dawn",
+    "category": "vs",
+    "file": "akari-dawn-theme.json"
+  },
+  {
+    "label": "Akari Night",
+    "category": "vs-dark",
+    "file": "akari-night-theme.json"
+  },
+  {
+    "label": "Maple Dark",
+    "category": "vs-dark",
+    "file": "maple-dark-color-theme.json"
+  },
+  {
+    "label": "Maple Light",
+    "category": "vs",
+    "file": "maple-light-color-theme.json"
+  },
+  {
+    "label": "Neon Genesis Dark",
+    "category": "vs-dark",
+    "file": "neon-genesis-dark-theme.json"
+  },
+  {
+    "label": "Neon Orchid Protocol",
+    "category": "vs-dark",
+    "file": "neon-orchid-protocol-theme.json"
+  },
+  {
+    "label": "Spiritwood Night",
+    "category": "vs-dark",
+    "file": "spiritwood-night-theme.json"
+  },
+  {
+    "label": "Candycore Noir",
+    "category": "vs-dark",
+    "file": "candycore-noir-theme.json"
+  },
+  {
+    "label": "Coffee Space Cats",
+    "category": "vs-dark",
+    "file": "coffee-space-cats-theme.json"
+  },
+  {
+    "label": "Cocoa Ember",
+    "category": "vs-dark",
+    "file": "cocoa-ember-theme.json"
+  },
+  {
+    "label": "Cyan Depths",
+    "category": "vs-dark",
+    "file": "cyan-depths-theme.json"
+  },
+  {
+    "label": "Elemental Spectrum",
+    "category": "vs-dark",
+    "file": "elemental-spectrum-theme.json"
+  },
+  {
+    "label": "Nothing OS Dark",
+    "category": "vs-dark",
+    "file": "nothing-os-dark-theme.json"
+  },
+  {
+    "label": "Nothing OS Dark (Glyph)",
+    "category": "vs-dark",
+    "file": "nothing-os-glyph-new-theme.json"
+  },
+  {
+    "label": "Nothing OS Gray",
+    "category": "vs-dark",
+    "file": "nothing-os-gray-theme.json"
+  },
+  {
+    "label": "Nothing OS Light",
+    "category": "vs",
+    "file": "nothing-os-light-theme.json"
+  },
+  {
+    "label": "Nothing OS Special",
+    "category": "vs-dark",
+    "file": "nothing-os-special-theme.json"
+  },
+  {
+    "label": "Bad Hacker",
+    "category": "vs-dark",
+    "file": "bad-hacker-theme.json"
+  },
+  {
+    "label": "Solstice Hibernal",
+    "category": "vs-dark",
+    "file": "solstice-hibernal-theme.json"
+  },
+  {
+    "label": "Solstice Estival",
+    "category": "vs",
+    "file": "solstice-estival-theme.json"
+  },
+  {
+    "label": "Miku Code",
+    "category": "vs-dark",
+    "file": "miku-code-theme.json"
+  },
+  {
+    "label": "Miku Code Fusion",
+    "category": "vs-dark",
+    "file": "miku-code-fusion-color-theme.json"
+  },
+  {
+    "label": "Miku Code Fusion Light",
+    "category": "vs",
+    "file": "miku-code-fusion-light-color-theme.json"
+  },
+  {
+    "label": "Miku Code Light",
+    "category": "vs",
+    "file": "miku-code-light-color-theme.json"
+  },
+  {
+    "label": "Sherwood Forest (Summer)",
+    "category": "vs-dark",
+    "file": "sherwood-forest-summer-theme.json"
+  },
+  {
+    "label": "Kelp Forest Bold",
+    "category": "vs-dark",
+    "file": "kelp-forest-bold-theme.json"
+  },
+  {
+    "label": "Kelp Forest Italic",
+    "category": "vs-dark",
+    "file": "kelp-forest-italic-theme.json"
+  },
+  {
+    "label": "Kelp Forest",
+    "category": "vs-dark",
+    "file": "kelp-forest-theme.json"
+  },
+  {
+    "label": "Cyberpink-137© Theme",
+    "category": "vs-dark",
+    "file": "cyberpink-137-theme.json"
+  },
+  {
+    "label": "Nexus Dark",
+    "category": "vs-dark",
+    "file": "nexus-dark-theme.json"
+  },
+  {
+    "label": "Espresso Dark",
+    "category": "vs-dark",
+    "file": "espresso-dark-theme.json"
+  }
+]

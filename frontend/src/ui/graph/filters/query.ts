@@ -11,11 +11,12 @@ export function toGraphQueryDTO(state: GraphViewState): application.GraphQueryDT
 
   return {
     seed: state.seed ?? '',
+    metadataSeed: state.metadataSeed ?? '',
     depth: state.depth,
-    types: state.facets.types,
-    tags: state.facets.tags,
-    pathPrefix,
-    favoritesOnly: state.facets.favorites,
+    types: state.metadataSeed ? [] : state.facets.types,
+    tags: state.metadataSeed ? [] : state.facets.tags,
+    pathPrefix: state.metadataSeed ? '' : pathPrefix,
+    favoritesOnly: state.metadataSeed ? false : state.facets.favorites,
     includeSoftLinks: state.includeSoftLinks,
     includeMetadataLinks: state.includeMetadataLinks,
     includeUnresolved: state.includeUnresolved,
@@ -25,6 +26,7 @@ export function toGraphQueryDTO(state: GraphViewState): application.GraphQueryDT
 export function defaultGraphViewState(): GraphViewState {
   return {
     seed: undefined,
+    metadataSeed: undefined,
     depth: 2,
     facets: {types: [], tags: [], folders: [], favorites: false},
     includeSoftLinks: true,

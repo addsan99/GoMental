@@ -39,12 +39,15 @@ import {
 import {
   Backlinks,
   DeleteNote,
+  DeleteNoteType,
   GitMergePullRequest,
   GitOpenPullRequest,
   GitSync,
   Info,
   ImportURL,
+  ImportNoteTypeCollection,
   ListNotes,
+  ListNoteTypes,
   LoadNoteAssetDataURL,
   LoadSettings,
   LoadUIState,
@@ -54,6 +57,7 @@ import {
   Rebuild,
   RecentWorkspaces,
   SaveNote,
+  SaveNoteType,
   SaveNoteAsset,
   SaveSettings,
   SaveUIState,
@@ -63,7 +67,9 @@ import {
   onEvent,
 } from './transport';
 import type {application} from '../wailsjs/go/models';
-import type {AppInfoWithMode, GoMentalSettings, GoMentalWorkspaceSettings, NoteDTOWithVersion} from './transport/types';
+import type {AppInfoWithMode, GoMentalSettings, GoMentalWorkspaceSettings, NoteDTOWithVersion, NoteType} from './transport/types';
+import {CSS_VARIABLE_NAMES, cssVariablesForTheme, loadVSCodeTheme} from './themes/vscode';
+import {themeOption, vscodeThemeOptions} from './themes/catalog';
 
 // Heavy views are code-split so they stay out of the initial bundle: the graph
 // canvas (sigma + graphology) and the two editors (@mdxeditor / CodeMirror) are
@@ -99,42 +105,8 @@ type RebuildProgress = {
 type SaveState = 'idle' | 'dirty' | 'saving' | 'saved' | 'conflict';
 type SearchStatus = 'idle' | 'searching' | 'ready' | 'error';
 type WorkspaceTab = 'note' | 'graph';
-type ThemeMode = 'light' | 'dark';
-type SettingsSection = 'appearance' | 'noteView' | 'graphView' | 'workspaceSettings';
-type NoteTemplateID =
-  | 'concept'
-  | 'adr'
-  | 'service'
-  | 'entity'
-  | 'how-to'
-  | 'recipe'
-  | 'gotcha'
-  | 'convention'
-  | 'plan'
-  | 'progress'
-  | 'meeting';
-
-type NoteTemplate = {
-  id: NoteTemplateID;
-  label: string;
-  buildDocument: (title: string, id: string) => string;
-};
-
-const NOTE_TEMPLATES: NoteTemplate[] = [
-  {id: 'concept', label: 'Concept', buildDocument: starterConceptOKFDocument},
-  {id: 'adr', label: 'ADR', buildDocument: starterADROKFDocument},
-  {id: 'service', label: 'Service', buildDocument: starterServiceOKFDocument},
-  {id: 'entity', label: 'Entity', buildDocument: starterEntityOKFDocument},
-  {id: 'how-to', label: 'How-to', buildDocument: starterHowToOKFDocument},
-  {id: 'recipe', label: 'Recipe', buildDocument: starterRecipeOKFDocument},
-  {id: 'gotcha', label: 'Gotcha', buildDocument: starterGotchaOKFDocument},
-  {id: 'convention', label: 'Convention', buildDocument: starterConventionOKFDocument},
-  {id: 'plan', label: 'Plan', buildDocument: starterPlanOKFDocument},
-  {id: 'progress', label: 'Progress', buildDocument: starterProgressOKFDocument},
-  {id: 'meeting', label: 'Meeting', buildDocument: starterMeetingOKFDocument},
-];
-
-const NOTE_TEMPLATE_OPTIONS = [...NOTE_TEMPLATES].sort((left, right) => left.label.localeCompare(right.label));
+type ThemeMode = string;
+type SettingsSection = 'appearance' | 'noteView' | 'graphView' | 'workspaceSettings' | 'types';
 
 // Above this many rendered graph nodes, 3D is auto-disabled: thousands of lit
 // spheres + text sprites orbiting is far heavier than the flat top-down view, and
@@ -152,7 +124,7 @@ const emptyInfo: AppInfoWithMode = {
 };
 
 const DEFAULT_SETTINGS: GoMentalSettings = {
-  version: 1,
+  version: 2,
   appearance: {
     theme: 'dark',
   },
@@ -187,7 +159,9 @@ function App() {
   const [progress, setProgress] = useState<string>('');
   const [projectionActive, setProjectionActive] = useState(false);
   const [newNoteOpen, setNewNoteOpen] = useState(false);
-  const [newNoteTemplate, setNewNoteTemplate] = useState<NoteTemplateID>('concept');
+  const [newNoteTemplate, setNewNoteTemplate] = useState('term');
+
+  const [noteTypes, setNoteTypes] = useState<NoteType[]>([]);
   const [newNoteTitle, setNewNoteTitle] = useState('');
   const [newNoteID, setNewNoteID] = useState('');
   const [importOpen, setImportOpen] = useState(false);
@@ -212,6 +186,19 @@ function App() {
   // carries over when switching between 2D and 3D.
   const [graphDepth, setGraphDepth] = useState(2);
   const [theme, setTheme] = useState<ThemeMode>(() => readStoredTheme());
+  useEffect(() => {
+    const shell = document.querySelector<HTMLElement>('.gm-shell');
+    if (!shell) return;
+    let cancelled = false;
+    CSS_VARIABLE_NAMES.forEach((key) => shell.style.removeProperty(key));
+    if (!themeOption(theme)) return;
+    const importedTheme = loadVSCodeTheme(theme);
+    if (!cancelled && importedTheme) {
+      const variables = cssVariablesForTheme(importedTheme);
+      CSS_VARIABLE_NAMES.forEach((key) => shell.style.setProperty(key, variables[key]));
+    }
+    return () => { cancelled = true; };
+  }, [theme]);
   // Facet selection (Types / Tags / Folders), owned here and shared by the right-rail
   // filter panel, the note-list tree (hides non-matches), and both graph instances.
   const [facets, setFacets] = useState<FacetFilter>({types: [], tags: [], folders: [], favorites: false});
@@ -364,6 +351,8 @@ function App() {
     try {
       const opened = await OpenWorkspace(path);
       setWorkspace(opened);
+      const loadedTypes = await ListNoteTypes();
+      setNoteTypes(loadedTypes);
       void refreshInfo();
       // Show the note list as soon as it's ready — this is the critical path.
       const {nextID} = await loadNotes(preferredNote);
@@ -427,12 +416,16 @@ function App() {
     setBusy('Creating note');
     setError('');
     try {
-      const template = NOTE_TEMPLATES.find((item) => item.id === newNoteTemplate) || NOTE_TEMPLATES[0];
-      const content = template.buildDocument(title || basename(id), id);
+      const noteType = noteTypes.find((item) => item.id === newNoteTemplate) || noteTypes[0];
+      if (!noteType) {
+        setError('This workspace has no installed note types. Add one in Settings > Types.');
+        return;
+      }
+      const content = renderNoteTypeStarterContent(noteType, title || basename(id), id);
       const saved = await SaveNote({id, content});
       pendingEditNoteRef.current = saved.id;
       setNewNoteOpen(false);
-      setNewNoteTemplate('concept');
+      setNewNoteTemplate(noteType.id);
       setNewNoteTitle('');
       setNewNoteID('');
       setSelectedNote(saved);
@@ -452,7 +445,7 @@ function App() {
     } finally {
       setBusy('');
     }
-  }, [busy, info.readOnly, loadNotes, newNoteID, newNoteTemplate, newNoteTitle, notes, settings, showToast, theme, workspace]);
+  }, [busy, info.readOnly, loadNotes, newNoteID, newNoteTemplate, newNoteTitle, noteTypes, notes, settings, showToast, theme, workspace]);
 
   const importFromURL = useCallback(async () => {
     if (!workspace || busy || info.readOnly || workspaceIsReadOnly(settings, workspace.root)) {
@@ -1314,7 +1307,7 @@ function App() {
   }, [paletteOpen, linkPickerOpen, isEditing, rawMode, openLinkPicker]);
 
   const toggleTheme = useCallback(() => {
-    const nextTheme = theme === 'dark' ? 'light' : 'dark';
+    const nextTheme = themeAppearance(theme) === 'dark' ? 'light' : 'dark';
     persistSettings({...settings, appearance: {...settings.appearance, theme: nextTheme}});
     if (workspace?.root) {
       void SaveUIState({lastWorkspace: workspace.root, lastNote: selectedID, theme: nextTheme}).catch((err) => setError(errorMessage(err)));
@@ -1344,8 +1337,8 @@ function App() {
       ? 'Read-only — workspace is configured as git connected.'
       : 'Read-only — workspace is configured local read-only.';
   const authoringDisabledTitle = readOnly ? readOnlyBannerText : undefined;
-  const workspaceNoteTemplateOptions = NOTE_TEMPLATE_OPTIONS.filter((template) => currentWorkspaceSettings.enabledTypes.includes(template.id));
-  const enabledNoteTemplateOptions = workspaceNoteTemplateOptions.length > 0 ? workspaceNoteTemplateOptions : NOTE_TEMPLATE_OPTIONS;
+  const workspaceNoteTemplateOptions = noteTypes.filter((template) => currentWorkspaceSettings.enabledTypes.includes(template.id));
+  const enabledNoteTemplateOptions = workspaceNoteTemplateOptions.length > 0 ? workspaceNoteTemplateOptions : noteTypes;
   // Server and viewer modes pin the workspace to a configured root, so the
   // header "Open" affordance (which would pick a different folder) does not
   // apply — the picker is a no-op in server mode and reopens the same root in
@@ -1369,12 +1362,12 @@ function App() {
       return;
     }
     if (!enabledNoteTemplateOptions.some((template) => template.id === newNoteTemplate)) {
-      setNewNoteTemplate((currentWorkspaceSettings.defaultType || enabledNoteTemplateOptions[0].id) as NoteTemplateID);
+      setNewNoteTemplate(currentWorkspaceSettings.defaultType || enabledNoteTemplateOptions[0].id);
     }
   }, [currentWorkspaceSettings.defaultType, enabledNoteTemplateOptions, newNoteTemplate, workspace]);
 
   return (
-    <div className="gm-shell" data-theme={theme}>
+    <div className="gm-shell" data-theme={themeAppearance(theme)}>
       {/* ============================ HEADER ============================ */}
       <header className="gm-header">
         <div className="gm-brand">
@@ -1504,7 +1497,7 @@ function App() {
           {projectionActive ? 'Rebuilding…' : 'Rebuild index'}
         </button>
         <button type="button" className="gm-btn gm-btn-icon" onClick={toggleTheme} title="Toggle theme">
-          {theme === 'dark' ? <SunIcon size={17} /> : <MoonIcon size={17} />}
+          {themeAppearance(theme) === 'dark' ? <SunIcon size={17} /> : <MoonIcon size={17} />}
         </button>
         <button type="button" className="gm-btn gm-btn-icon" onClick={() => setSettingsOpen(true)} title="Settings" aria-label="Settings">
           <GearIcon size={17} />
@@ -1545,7 +1538,7 @@ function App() {
                   className="gm-btn gm-btn-primary gm-btn-sm"
                   onClick={() => {
                     setImportOpen(false);
-                    setNewNoteTemplate((currentWorkspaceSettings.defaultType || enabledNoteTemplateOptions[0].id) as NoteTemplateID);
+                    setNewNoteTemplate(currentWorkspaceSettings.defaultType || enabledNoteTemplateOptions[0].id);
                     setNewNoteOpen((open) => !open);
                   }}
                   disabled={!workspace || interactionBusy || readOnly}
@@ -1583,8 +1576,8 @@ function App() {
             {workspace && newNoteOpen && (
               <form className="gm-inline-form" onSubmit={(event) => { event.preventDefault(); void createNote(); }}>
                 <label>
-                  <span>Template</span>
-                  <select value={newNoteTemplate} onChange={(event) => setNewNoteTemplate(event.target.value as NoteTemplateID)} autoFocus>
+                  <span>Note Type</span>
+                  <select value={newNoteTemplate} onChange={(event) => setNewNoteTemplate(event.target.value)} autoFocus>
                     {enabledNoteTemplateOptions.map((template) => (
                       <option key={template.id} value={template.id}>{template.label}</option>
                     ))}
@@ -1862,7 +1855,7 @@ function App() {
                   onFacetsChange={setFacets}
                   selectedID={selectedID}
                   refreshKey={graphRevision}
-                  theme={theme}
+                  theme={themeAppearance(theme)}
                   active={activeTab === 'graph' && graphMode === '2d'}
                   depth={graphDepth}
                   onDepthChange={setGraphDepth}
@@ -1886,7 +1879,7 @@ function App() {
                   onFacetsChange={setFacets}
                   selectedID={selectedID}
                   refreshKey={graphRevision}
-                  theme={theme}
+                  theme={themeAppearance(theme)}
                   active={activeTab === 'graph' && graphMode === '3d'}
                   depth={graphDepth}
                   onDepthChange={setGraphDepth}
@@ -1913,7 +1906,7 @@ function App() {
                         ref={codeMirrorRef}
                         value={draft}
                         notes={notes}
-                        theme={theme}
+                        theme={themeAppearance(theme)}
                         onChange={handleDraftChange}
                         onSave={() => saveCurrentNote(true)}
                         onNavigate={navigateToNote}
@@ -1933,7 +1926,7 @@ function App() {
                     ref={mdxEditorRef}
                     noteID={selectedID}
                     content={renderContent}
-                    theme={theme}
+                    theme={themeAppearance(theme)}
                     onNavigate={navigateToNote}
                     onChange={handleDraftChange}
                     onSaveImage={saveEditorImage}
@@ -1945,7 +1938,7 @@ function App() {
           ) : selectedNoteReady && selectedNote ? (
             <div className="gm-article-scroll scroll" ref={articleScrollRef}>
               {settings.noteView.showFindBar && <FindBar containerRef={articleScrollRef} contentKey={selectedID} />}
-              <MarkdownArticle model={article} tags={selectedTags} noteID={selectedID} onNavigate={navigateToNote} theme={theme} />
+              <MarkdownArticle model={article} tags={selectedTags} noteID={selectedID} onNavigate={navigateToNote} theme={themeAppearance(theme)} />
             </div>
           ) : workspace && selectedID ? (
             <div className="gm-empty">
@@ -2092,6 +2085,7 @@ function App() {
         settings={settings}
         recent={recent}
         currentWorkspace={workspace?.root || ''}
+        noteTypes={noteTypes}
         activeSection={settingsSection}
         saveState={settingsSaveState}
         onClose={() => setSettingsOpen(false)}
@@ -2104,6 +2098,46 @@ function App() {
           return path;
         }}
         onChange={persistSettings}
+        onSaveNoteType={async (definition) => {
+          let saved: NoteType;
+          try {
+            saved = await SaveNoteType(definition);
+          } catch (err) {
+            setError(errorMessage(err));
+            throw err;
+          }
+          setNoteTypes((current) => [...current.filter((item) => item.id !== saved.id), saved].sort((a, b) => a.label.localeCompare(b.label)));
+          if (workspace?.root) {
+            const workspaceSettings = workspaceSettingsFor(settings, workspace.root);
+            persistSettings({...settings, workspaces: {...settings.workspaces, [workspace.root]: {...workspaceSettings, enabledTypes: ensureEnabledType(workspaceSettings.enabledTypes, saved.id)}}});
+          }
+          showToast(`Saved ${saved.label} Note Type`);
+        }}
+        onDeleteNoteType={async (id) => {
+          try {
+            await DeleteNoteType(id);
+          } catch (err) {
+            setError(errorMessage(err));
+            throw err;
+          }
+          setNoteTypes((current) => current.filter((item) => item.id !== id));
+          setNotes((current) => current.map((note) => note.type === id ? {...note, type: 'general'} : note));
+          if (workspace?.root) {
+            const workspaceSettings = workspaceSettingsFor(settings, workspace.root);
+            const enabledTypes = workspaceSettings.enabledTypes.filter((type) => type !== id);
+            persistSettings({...settings, workspaces: {...settings.workspaces, [workspace.root]: {...workspaceSettings, enabledTypes, defaultType: workspaceSettings.defaultType === id ? (enabledTypes[0] || '') : workspaceSettings.defaultType}}});
+          }
+          showToast('Note Type removed');
+        }}
+        onImportCollection={async (content) => {
+          const imported = await ImportNoteTypeCollection(content);
+          setNoteTypes((current) => [...current.filter((item) => !imported.some((saved) => saved.id === item.id)), ...imported].sort((a, b) => a.label.localeCompare(b.label)));
+          if (workspace?.root) {
+            const workspaceSettings = workspaceSettingsFor(settings, workspace.root);
+            persistSettings({...settings, workspaces: {...settings.workspaces, [workspace.root]: {...workspaceSettings, enabledTypes: Array.from(new Set([...workspaceSettings.enabledTypes, ...imported.map((type) => type.id)]))}}});
+          }
+          showToast(`Imported ${imported.length} Note Type${imported.length === 1 ? '' : 's'}`);
+        }}
       />
       <Toast message={toastMsg} />
     </div>
@@ -2126,29 +2160,39 @@ function SettingsModal({
   settings,
   recent,
   currentWorkspace,
+  noteTypes,
   activeSection,
   saveState,
   onClose,
   onSectionChange,
   onBrowseWorkspace,
   onChange,
+  onSaveNoteType,
+  onDeleteNoteType,
+  onImportCollection,
 }: {
   open: boolean;
   settings: GoMentalSettings;
   recent: application.RecentWorkspaceDTO[];
   currentWorkspace: string;
+  noteTypes: NoteType[];
   activeSection: SettingsSection;
   saveState: 'idle' | 'saving' | 'saved' | 'error';
   onClose: () => void;
   onSectionChange: (section: SettingsSection) => void;
   onBrowseWorkspace: () => Promise<string>;
   onChange: (settings: GoMentalSettings) => void;
+  onSaveNoteType: (definition: NoteType) => Promise<void>;
+  onDeleteNoteType: (id: string) => Promise<void>;
+  onImportCollection: (content: string) => Promise<void>;
 }) {
   const workspacePaths = useMemo(
     () => knownWorkspacePaths(settings, recent, currentWorkspace),
     [currentWorkspace, recent, settings],
   );
   const [selectedWorkspacePath, setSelectedWorkspacePath] = useState('');
+  const [typeDraft, setTypeDraft] = useState<NoteType | null>(null);
+  const [typeSaving, setTypeSaving] = useState(false);
 
   useEffect(() => {
     if (!open) {
@@ -2180,6 +2224,7 @@ function SettingsModal({
     {id: 'noteView', label: 'Note View'},
     {id: 'graphView', label: 'Graph View'},
     {id: 'workspaceSettings', label: 'Workspace Settings'},
+    {id: 'types', label: 'Note Types'},
   ];
   const saveLabel = saveState === 'saving' ? 'Saving...' : saveState === 'saved' ? 'Saved' : saveState === 'error' ? 'Could not save' : 'Auto-saved';
   const selectedWorkspaceSettings = selectedWorkspacePath
@@ -2260,6 +2305,7 @@ function SettingsModal({
                   >
                     <option value="dark">Dark</option>
                     <option value="light">Light</option>
+                    {vscodeThemeOptions.map((theme) => <option key={theme.id} value={theme.id}>{theme.label} ({theme.category})</option>)}
                   </select>
                 </label>
               </SettingsGroup>
@@ -2335,6 +2381,31 @@ function SettingsModal({
                 </label>
               </SettingsGroup>
             )}
+            {activeSection === 'types' && (
+              <SettingsGroup title="Workspace Note Types">
+                {currentWorkspace ? (
+                  <div className="gm-type-manager">
+                    <div className="gm-type-manager-toolbar">
+                      <button type="button" className="gm-btn gm-btn-sm" onClick={() => setTypeDraft({id: '', label: '', description: '', template: '---\ntype: {{type}}\ntitle: {{titleYaml}}\n---\n\n# {{title}}\n\n', source: 'workspace'})}>New Note Type</button>
+                      <button type="button" className="gm-btn gm-btn-sm gm-btn-ghost" onClick={() => { const content = window.prompt('Paste a Note Type collection YAML.'); if (content?.trim()) { void onImportCollection(content).catch(() => {}); } }}>Import</button>
+                      <label className="gm-type-manager-select"><span>Note Type</span><select value={typeDraft?.id || ''} onChange={(event) => setTypeDraft(noteTypes.find((type) => type.id === event.target.value) || null)}><option value="">Choose a Note Type</option>{noteTypes.map((type) => <option key={type.id} value={type.id}>{type.label}</option>)}</select></label>
+                    </div>
+                    <div className="gm-type-manager-editor">
+                      {typeDraft ? <>
+                        <label>Note Type ID<input value={typeDraft.id} disabled={typeDraft.source === 'builtin' || noteTypes.some((type) => type.id === typeDraft.id)} onChange={(event) => setTypeDraft({...typeDraft, id: event.target.value.toLowerCase()})} placeholder="project-brief" /></label>
+                        <label>Note Type Name<input value={typeDraft.label} disabled={typeDraft.source === 'builtin'} onChange={(event) => setTypeDraft({...typeDraft, label: event.target.value})} placeholder="Project brief" /></label>
+                        <label>Description<input value={typeDraft.description} disabled={typeDraft.source === 'builtin'} onChange={(event) => setTypeDraft({...typeDraft, description: event.target.value})} placeholder="What this Note Type is for" /></label>
+                        <label>Starter Content<textarea value={typeDraft.template} disabled={typeDraft.source === 'builtin'} onChange={(event) => setTypeDraft({...typeDraft, template: event.target.value})} spellCheck={false} /></label>
+                        <div className="gm-type-manager-actions">
+                          {typeDraft.source !== 'builtin' && <button type="button" className="gm-btn" disabled={typeSaving} onClick={() => { setTypeSaving(true); void onSaveNoteType(typeDraft).then(() => setTypeSaving(false)).catch(() => setTypeSaving(false)); }}>{typeSaving ? 'Saving...' : 'Save Note Type'}</button>}
+                          {typeDraft.source !== 'builtin' && noteTypes.some((type) => type.id === typeDraft.id) && <button type="button" className="gm-btn gm-btn-ghost" disabled={typeSaving} onClick={() => { if (window.confirm(`Remove ${typeDraft.label}? Existing notes retain their original metadata and behave as General until this Note Type is restored.`)) { setTypeSaving(true); void onDeleteNoteType(typeDraft.id).then(() => { setTypeDraft(null); setTypeSaving(false); }).catch(() => setTypeSaving(false)); } }}>Remove Note Type</button>}
+                        </div>
+                      </> : <div className="gm-workspace-empty gm-workspace-empty-large">Choose a type to edit its workspace file.</div>}
+                    </div>
+                  </div>
+                ) : <div className="gm-workspace-empty gm-workspace-empty-large">Open a workspace to manage its installed types.</div>}
+              </SettingsGroup>
+            )}
             {activeSection === 'workspaceSettings' && (
               <SettingsGroup title="Workspace Settings">
                 <div className="gm-workspace-settings">
@@ -2370,8 +2441,8 @@ function SettingsModal({
                         </div>
                         <label className="gm-setting-row">
                           <span>
-                            <strong>Default type</strong>
-                            <small>Used as the starting type for new notes in this workspace.</small>
+                            <strong>Default Note Type</strong>
+                            <small>Used as the starting Note Type for new notes in this workspace.</small>
                           </span>
                           <select
                             value={selectedWorkspaceSettings.defaultType}
@@ -2381,18 +2452,18 @@ function SettingsModal({
                               enabledTypes: ensureEnabledType(selectedWorkspaceSettings.enabledTypes, event.target.value),
                             })}
                           >
-                            {NOTE_TEMPLATE_OPTIONS.map((template) => (
+                            {noteTypes.map((template) => (
                               <option key={template.id} value={template.id}>{template.label}</option>
                             ))}
                           </select>
                         </label>
                         <div className="gm-setting-block">
                           <div>
-                            <strong>Enabled types</strong>
-                            <small>Controls which note templates are available in this workspace.</small>
+                            <strong>Enabled Note Types</strong>
+                            <small>Controls which Note Types are available in this workspace.</small>
                           </div>
                           <div className="gm-type-checks">
-                            {NOTE_TEMPLATE_OPTIONS.map((template) => {
+                            {noteTypes.map((template) => {
                               const checked = selectedWorkspaceSettings.enabledTypes.includes(template.id);
                               return (
                                 <label className="gm-type-check" key={template.id}>
@@ -2892,261 +2963,6 @@ function gitChipTitle(git: {remote: string; ref: string; commit: string; lastSyn
   return lines.join('\n');
 }
 
-function starterConceptOKFDocument(title: string, id: string): string {
-  return starterOKFDocument('concept', title, id, ['tags: []'], (safeTitle) => `# ${safeTitle}
-> One-line definition.
-
-## Details
-
-## Related
-`);
-}
-
-function starterADROKFDocument(title: string, id: string): string {
-  return starterOKFDocument('adr', title, id, [
-    'status: proposed',
-    `date: ${todayISO()}`,
-    'superseded_by:',
-  ], (safeTitle) => `# ${safeTitle}
-
-## Context
-
-## Decision
-
-## Consequences
-
-## Alternatives considered
-`);
-}
-
-function starterServiceOKFDocument(title: string, id: string): string {
-  return starterOKFDocument('service', title, id, [
-    'owner:',
-    'repo:',
-    'depends_on: []',
-  ], (safeTitle) => `# ${safeTitle}
-> What it does, one line.
-
-## Ownership
-
-## Interfaces
-
-## Dependencies
-
-## Related
-`);
-}
-
-function starterEntityOKFDocument(title: string, id: string): string {
-  return starterOKFDocument('entity', title, id, [
-    'description:',
-  ], (safeTitle) => `# ${safeTitle}
-> What this entity represents.
-
-## Fields
-
-| field | type | description |
-|-------|------|-------------|
-| id | uuid | Primary key |
-
-## Used by
-
-## Related entities
-`);
-}
-
-function starterHowToOKFDocument(title: string, id: string): string {
-  return starterOKFDocument('how-to', title, id, [
-    'audience:',
-  ], (safeTitle) => `# ${safeTitle}
-**Goal:** what you'll achieve.
-
-## Prerequisites
-
-## Steps
-
-1. 
-
-## Related
-`);
-}
-
-function starterRecipeOKFDocument(title: string, id: string): string {
-  return starterOKFDocument('recipe', title, id, [
-    'description:',
-    'tags:',
-    '  - recipe',
-    'prep_time:',
-    'cook_time:',
-    'total_time:',
-    'servings:',
-    'source_url:',
-  ], (safeTitle) => `# ${safeTitle}
-
-## Summary
-
-Briefly describe the dish, when to make it, and what makes it work.
-
-## Details
-
-- **Prep time:**
-- **Cook time:**
-- **Total time:**
-- **Yield:**
-- **Category:**
-- **Cuisine:**
-
-## Ingredients
-
-- 
-
-## Equipment
-
-- 
-
-## Instructions
-
-1. 
-
-## Tips
-
-- 
-
-## Variations
-
-- 
-
-## Storage
-
-- 
-`);
-}
-
-function starterGotchaOKFDocument(title: string, id: string): string {
-  return starterOKFDocument('gotcha', title, id, [
-    'applies_to: []',
-  ], (safeTitle) => `# ${safeTitle}
-
-## What goes wrong
-
-## Why
-
-## What to do instead
-`);
-}
-
-function starterConventionOKFDocument(title: string, id: string): string {
-  return starterOKFDocument('convention', title, id, [
-    'applies_to: []',
-  ], (safeTitle) => `# ${safeTitle}
-
-## The convention
-
-## Rationale
-
-## Example
-
-## Exceptions
-`);
-}
-
-function starterPlanOKFDocument(title: string, id: string): string {
-  return starterOKFDocument('plan', title, id, [
-    'status: draft',
-    'implements: []',
-  ], (safeTitle) => `# ${safeTitle}
-
-## Context / Goal
-
-## Approach
-
-## Areas affected
-
-## Risks
-
-## Verification
-`);
-}
-
-function starterProgressOKFDocument(title: string, id: string): string {
-  return starterOKFDocument('progress', title, id, [
-    'plan:',
-    'status: active',
-    `updated: ${todayISO()}`,
-  ], (safeTitle) => `# ${safeTitle}
-
-## Done
-
-## In progress
-
-## Pending
-
-## Deferred / Blocked
-`);
-}
-
-function starterMeetingOKFDocument(title: string, id: string): string {
-  return starterOKFDocument('meeting', title, id, [
-    'date: ""',
-    'attendees: []',
-  ], (safeTitle) => `# Meeting Summary: ${safeTitle}
-
-## Snapshot
-- Date:
-- Time:
-- Attendees:
-- Related project:
-- Source:
-
-## Summary
-Short 3-6 sentence narrative of what happened and why it matters.
-
-## Key Points
-- 
-- 
-- 
-
-## Decisions
-- Decision:
-  Owner:
-  Rationale:
-  Impact:
-
-## Action Items
-- [ ] Task
-  Owner:
-  Due:
-  Context:
-
-## Open Questions
-- 
-- 
-
-## Follow-Ups
-- Next meeting:
-- People to notify:
-- Notes to link:
-
-## Context / Background
-Useful links, agenda items, prior notes, customer context, project state.
-
-## Raw Import
-Optional collapsed/transcript/imported agenda section.
-`);
-}
-
-function starterOKFDocument(type: NoteTemplateID, title: string, id: string, metadataLines: string[], body: (safeTitle: string) => string): string {
-  const safeTitle = title.trim() || basename(id);
-  const frontmatter = [
-    '---',
-    `type: ${type}`,
-    `title: ${yamlQuote(safeTitle)}`,
-    ...metadataLines,
-    '---',
-  ].join('\n');
-  return `${frontmatter}\n\n${body(safeTitle)}`;
-}
-
 function normalizeNewNoteID(value: string): string {
   return slugifyNoteID(value)
     .replace(/^\/+/, '')
@@ -3184,7 +3000,8 @@ function todayISO(): string {
 }
 
 function normalizeSettings(value: GoMentalSettings): GoMentalSettings {
-  const theme = value?.appearance?.theme === 'light' || value?.appearance?.theme === 'dark'
+	const needsGeneralTypeMigration = (value?.version || 0) < 2;
+  const theme = value?.appearance?.theme === 'light' || value?.appearance?.theme === 'dark' || themeOption(value?.appearance?.theme || '')
     ? value.appearance.theme
     : DEFAULT_SETTINGS.appearance.theme;
   const defaultEditMode = value?.noteView?.defaultEditMode === 'source' || value?.noteView?.defaultEditMode === 'rich'
@@ -3200,10 +3017,14 @@ function normalizeSettings(value: GoMentalSettings): GoMentalSettings {
     if (!trimmedPath) {
       continue;
     }
-    workspaces[trimmedPath] = normalizeWorkspaceSettings(workspaceSettings);
+    const normalizedWorkspaceSettings = normalizeWorkspaceSettings(workspaceSettings);
+    if (needsGeneralTypeMigration && !normalizedWorkspaceSettings.enabledTypes.includes('general')) {
+      normalizedWorkspaceSettings.enabledTypes = ensureEnabledType(normalizedWorkspaceSettings.enabledTypes, 'general');
+    }
+    workspaces[trimmedPath] = normalizedWorkspaceSettings;
   }
   return {
-    version: 1,
+    version: 2,
     appearance: {theme},
     noteView: {
       defaultEditMode,
@@ -3240,10 +3061,22 @@ function workspaceIsReadOnly(settings: GoMentalSettings, path: string): boolean 
   return Boolean(path && mode !== 'editable' && mode !== 'writableGit');
 }
 
+function renderNoteTypeStarterContent(type: NoteType, title: string, id: string): string {
+  const safeTitle = title.trim() || basename(id);
+  const replacements: Record<string, string> = {
+    title: safeTitle,
+    titleYaml: yamlQuote(safeTitle),
+    id,
+    type: type.id,
+    date: todayISO(),
+  };
+  return type.template.replace(/{{\s*(title|titleYaml|id|type|date)\s*}}/g, (_full, key: string) => replacements[key]);
+}
+
 function defaultWorkspaceSettings(): GoMentalWorkspaceSettings {
   return {
-    defaultType: 'concept',
-    enabledTypes: NOTE_TEMPLATE_OPTIONS.map((template) => template.id),
+    defaultType: 'term',
+    enabledTypes: [],
     accessMode: 'editable',
     gitUrl: '',
     gitBaseRef: 'main',
@@ -3256,13 +3089,9 @@ function defaultWorkspaceSettings(): GoMentalWorkspaceSettings {
 
 function normalizeWorkspaceSettings(value: GoMentalWorkspaceSettings): GoMentalWorkspaceSettings {
   const defaults = defaultWorkspaceSettings();
-  const templateIDs = new Set(NOTE_TEMPLATE_OPTIONS.map((template) => template.id));
-  const enabledTypes = Array.from(new Set((value?.enabledTypes || []).filter((type) => templateIDs.has(type as NoteTemplateID))));
-  const defaultType = templateIDs.has(value?.defaultType as NoteTemplateID)
-    ? value.defaultType
-    : defaults.defaultType;
-  const normalizedEnabledTypes = enabledTypes.length > 0 ? enabledTypes : [...defaults.enabledTypes];
-  const ensuredEnabledTypes = ensureEnabledType(normalizedEnabledTypes, defaultType);
+  const enabledTypes = Array.from(new Set((value?.enabledTypes || []).map((type) => type.trim() === 'concept' ? 'term' : type.trim()).filter(Boolean)));
+  const requestedDefaultType = value?.defaultType?.trim() === 'concept' ? 'term' : value?.defaultType?.trim();
+  const defaultType = requestedDefaultType || defaults.defaultType;
   const accessMode = value?.accessMode === 'readOnlyLocal' || value?.accessMode === 'readOnlyGit' || value?.accessMode === 'writableGit' || value?.accessMode === 'editable'
     ? value.accessMode
     : defaults.accessMode;
@@ -3271,7 +3100,7 @@ function normalizeWorkspaceSettings(value: GoMentalWorkspaceSettings): GoMentalW
     : defaults.gitExitAction;
   return {
     defaultType,
-    enabledTypes: ensuredEnabledTypes,
+    enabledTypes,
     accessMode,
     gitUrl: accessMode === 'readOnlyGit' || accessMode === 'writableGit' ? (value?.gitUrl || '').trim() : '',
     gitBaseRef: accessMode === 'readOnlyGit' || accessMode === 'writableGit' ? (value?.gitBaseRef || 'main').trim() : '',
@@ -3324,6 +3153,11 @@ function readStoredGraphMode(): '2d' | '3d' {
   return '2d';
 }
 
+function themeAppearance(theme: string): 'light' | 'dark' {
+  if (theme === 'light') return 'light';
+  return themeOption(theme)?.category === 'light' ? 'light' : 'dark';
+}
+
 function readStoredTheme(): ThemeMode {
   try {
     const stored = localStorage.getItem('gm-theme');
@@ -3342,3 +3176,4 @@ function isConflictError(err: unknown): boolean {
 
 
 export default App;
+

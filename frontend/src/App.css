@@ -1356,6 +1356,17 @@ body.gm-resizing * { cursor: col-resize !important; }
 }
 .gm-type-check input { accent-color: var(--accent); cursor: pointer; }
 .gm-type-check span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.gm-type-manager { display: grid; grid-template-rows: auto minmax(0, 1fr); min-height: 390px; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+.gm-type-manager-toolbar { position: sticky; top: 0; z-index: 1; display: flex; align-items: end; gap: 8px; padding: 10px; background: var(--surface-2); border-bottom: 1px solid var(--border); }
+.gm-type-manager-toolbar .gm-btn { white-space: nowrap; }
+.gm-type-manager-select { display: grid; gap: 4px; min-width: 190px; margin-left: auto; color: var(--text-3); font: 600 11px/1 var(--font-ui); }
+.gm-type-manager-select select { height: 34px; min-width: 220px; border: 1px solid var(--border-strong); border-radius: 6px; padding: 0 8px; background: var(--surface); color: var(--text); font: 500 12px/1 var(--font-ui); }
+.gm-type-manager-editor { display: grid; align-content: start; gap: 12px; padding: 16px; }
+.gm-type-manager-editor label { display: grid; gap: 5px; color: var(--text-2); font: 600 12px/1 var(--font-ui); }
+.gm-type-manager-editor input, .gm-type-manager-editor textarea { width: 100%; border: 1px solid var(--border-strong); border-radius: 6px; padding: 8px; background: var(--surface-2); color: var(--text); font: 400 12px/1.4 var(--font-mono); }
+.gm-type-manager-editor input { font-family: var(--font-ui); }
+.gm-type-manager-editor textarea { min-height: 160px; resize: vertical; }
+.gm-type-manager-actions { display: flex; gap: 8px; }
 
 /* ---- Toast ---- */
 .gm-toast {
@@ -1389,5 +1400,8 @@ body.gm-resizing * { cursor: col-resize !important; }
   .gm-setting-row { grid-template-columns: 1fr; align-items: stretch; }
   .gm-setting-row-checkbox { grid-template-columns: minmax(0, 1fr) auto; align-items: center; }
   .gm-workspace-settings { grid-template-columns: 1fr; }
+  .gm-type-manager-toolbar { align-items: stretch; flex-wrap: wrap; }
+  .gm-type-manager-select { margin-left: 0; flex: 1 1 100%; }
+  .gm-type-manager-select select { min-width: 0; }
   .gm-workspace-list { border-right: none; border-bottom: 1px solid var(--border); max-height: 220px; }
 }

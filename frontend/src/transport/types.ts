@@ -83,7 +83,7 @@ export type MoveNoteRequest = {
 export type GoMentalSettings = {
   version: number
   appearance: {
-    theme: 'light' | 'dark'
+    theme: string
   }
   noteView: {
     defaultEditMode: 'rich' | 'source'
@@ -106,4 +106,12 @@ export type GoMentalWorkspaceSettings = {
   gitUsername: string
   gitToken: string
   gitExitAction: 'none' | 'prompt' | 'autoPr' | 'autoMerge'
+}
+
+export type NoteType = {
+  id: string
+  label: string
+  description: string
+  template: string
+  source: string
 }

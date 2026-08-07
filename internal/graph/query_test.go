@@ -110,6 +110,54 @@ func TestQueryNeighborhoodIncludesMetadataEdges(t *testing.T) {
 	}
 }
 
+func TestQueryMetadataSeedExpandsThroughNoteLinksByDepth(t *testing.T) {
+	store := openStore(t, filepath.Join(t.TempDir(), "graph.sqlite"))
+	ctx := context.Background()
+
+	beta := domain.NoteID("beta")
+	gamma := domain.NoteID("gamma")
+	if err := store.ReplaceOutgoingLinks(ctx, "alpha", []domain.NoteLink{{Target: "beta", ResolvedID: &beta, Strength: domain.LinkStrengthHard}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.ReplaceOutgoingLinks(ctx, "beta", []domain.NoteLink{{Target: "gamma", ResolvedID: &gamma, Strength: domain.LinkStrengthHard}}); err != nil {
+		t.Fatal(err)
+	}
+	for _, n := range []domain.ParsedOKFNote{
+		metaNote("alpha", "concept", []domain.Tag{"go"}, nil),
+		metaNote("beta", "concept", nil, nil),
+		metaNote("gamma", "concept", []domain.Tag{"go"}, nil),
+	} {
+		if err := store.ReplaceMetadataLinks(ctx, n.ID, MetadataMemberships(n)); err != nil {
+			t.Fatalf("replace metadata %s: %v", n.ID, err)
+		}
+		if err := store.UpsertNoteMeta(ctx, NoteMeta{ID: n.ID, Type: n.Metadata.Type, Tags: n.Tags}); err != nil {
+			t.Fatalf("upsert meta %s: %v", n.ID, err)
+		}
+	}
+
+	depth1, err := store.Query(ctx, domain.GraphQuery{MetadataSeed: "tag:go", Depth: 1, IncludeMetadataLinks: true})
+	if err != nil {
+		t.Fatalf("query depth 1: %v", err)
+	}
+	if !hasNode(depth1, "tag:go") || !hasNode(depth1, "alpha") || !hasNode(depth1, "gamma") || hasNode(depth1, "beta") {
+		t.Fatalf("depth 1 should keep hub and directly tagged notes only, got %#v", depth1.Nodes)
+	}
+	if hasEdgeKind(depth1, domain.GraphEdgeLinksTo) {
+		t.Fatalf("depth 1 should not include note-link expansion edges, got %#v", depth1.Edges)
+	}
+
+	depth2, err := store.Query(ctx, domain.GraphQuery{MetadataSeed: "tag:go", Depth: 2, IncludeMetadataLinks: true})
+	if err != nil {
+		t.Fatalf("query depth 2: %v", err)
+	}
+	if !hasNode(depth2, "tag:go") || !hasNode(depth2, "alpha") || !hasNode(depth2, "beta") || !hasNode(depth2, "gamma") {
+		t.Fatalf("depth 2 should include note-link neighbours from tagged notes, got %#v", depth2.Nodes)
+	}
+	if !hasEdgeKind(depth2, domain.GraphEdgeLinksTo) {
+		t.Fatalf("depth 2 should include note-link expansion edges, got %#v", depth2.Edges)
+	}
+}
+
 // With no seed and no predicates, Query behaves like a full-graph selection:
 // every note (including isolated ones) appears.
 func TestQueryFullGraphIncludesIsolatedNotes(t *testing.T) {

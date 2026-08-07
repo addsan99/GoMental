@@ -85,16 +85,18 @@ export function parseArticle(rawContent: string, fallbackTitle: string): Article
       if (level === 1 && !title) {
         title = text;
       } else if (level === 2) {
-        const anchor = slugify(text);
+        const outlineText = plainInlineText(text);
+        const anchor = slugify(outlineText);
         blocks.push({t: 'h2', text, anchor});
-        outline.push({anchor, text});
+        outline.push({anchor, text: outlineText});
       } else if (level >= 3) {
         blocks.push({t: 'h3', text});
       } else {
         // Additional H1s render as H2-style sections.
-        const anchor = slugify(text);
+        const outlineText = plainInlineText(text);
+        const anchor = slugify(outlineText);
         blocks.push({t: 'h2', text, anchor});
-        outline.push({anchor, text});
+        outline.push({anchor, text: outlineText});
       }
       i += 1;
       continue;
@@ -268,6 +270,17 @@ function countWords(lead: string, blocks: Block[]): number {
     }
   }
   return n;
+}
+
+function plainInlineText(text: string): string {
+  return text
+    .replace(/!\[([^\]]*)\]\(([^)]+)\)/g, '$1')
+    .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '$1')
+    .replace(/\[\[([^\]|]+)(?:\|([^\]]+))?\]\]/g, (_full, target: string, label?: string) => label || target)
+    .replace(/\*\*(.+?)\*\*/g, '$1')
+    .replace(/\*([^*\n]+?)\*/g, '$1')
+    .replace(/`([^`]+?)`/g, '$1')
+    .trim();
 }
 
 // ---- Inline rendering ----------------------------------------------------
@@ -462,7 +475,7 @@ export function MarkdownArticle({model, tags, noteID, onNavigate, theme = 'light
           </span>
         </div>
       )}
-      <h1 className="gm-article-title">{model.title}</h1>
+      <h1 className="gm-article-title">{renderInline(model.title, onNavigate, 'title')}</h1>
       {model.lead && <p className="gm-article-lead">{renderInline(model.lead, onNavigate, 'lead')}</p>}
 
       {model.blocks.map((block, index) => {
@@ -471,13 +484,13 @@ export function MarkdownArticle({model, tags, noteID, onNavigate, theme = 'light
           case 'h2':
             return (
               <h2 className="gm-h2" data-anchor={block.anchor} key={key}>
-                {block.text}
+                {renderInline(block.text, onNavigate, key)}
               </h2>
             );
           case 'h3':
             return (
               <h3 className="gm-h3" key={key}>
-                {block.text}
+                {renderInline(block.text, onNavigate, key)}
               </h3>
             );
           case 'p':

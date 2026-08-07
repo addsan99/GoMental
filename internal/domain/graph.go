@@ -113,8 +113,9 @@ type GraphFilter struct {
 // restriction. The predicates apply only to note nodes — metadata hub nodes
 // (tag/type/heading) and unresolved nodes are not filtered by them.
 type GraphQuery struct {
-	Seed  *NoteID // optional focus note; nil = full graph
-	Depth int     // hops from Seed; ignored when Seed is nil
+	Seed         *NoteID // optional focus note; nil = full graph
+	MetadataSeed string  // optional metadata hub focus (e.g. "tag:go")
+	Depth        int     // hops from Seed/MetadataSeed; ignored when both are empty
 
 	// Metadata predicates restricting which note nodes are included.
 	Types         []string

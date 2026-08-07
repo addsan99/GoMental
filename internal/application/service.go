@@ -161,6 +161,7 @@ type GraphFilterDTO struct {
 // depth-bounded neighborhood. Types/Tags/PathPrefix restrict the note node set.
 type GraphQueryDTO struct {
 	Seed                 string   `json:"seed"`
+	MetadataSeed         string   `json:"metadataSeed"`
 	Depth                int      `json:"depth"`
 	Types                []string `json:"types"`
 	Tags                 []string `json:"tags"`
@@ -518,7 +519,7 @@ func (s *Service) ListNotes(ctx context.Context) ([]NoteSummaryDTO, error) {
 	}
 	if fromSQLite && graphStore != nil {
 		if res, lerr := graphStore.ListNotes(ctx, graph.ListNotesOptions{}); lerr == nil {
-			return noteRowsToDTOs(res.Items), nil
+			return s.resolveNoteTypes(ctx, noteRowsToDTOs(res.Items))
 		}
 	}
 	notes, err := repo.List(ctx)
@@ -529,7 +530,26 @@ func (s *Service) ListNotes(ctx context.Context) ([]NoteSummaryDTO, error) {
 	for i, note := range notes {
 		out[i] = noteSummaryDTO(note)
 	}
-	return out, nil
+	return s.resolveNoteTypes(ctx, out)
+}
+
+// resolveNoteTypes keeps the stored frontmatter untouched. A note whose type
+// definition was removed behaves as General until that definition is restored.
+func (s *Service) resolveNoteTypes(ctx context.Context, notes []NoteSummaryDTO) ([]NoteSummaryDTO, error) {
+	types, err := s.ListNoteTypes(ctx)
+	if err != nil {
+		return nil, err
+	}
+	known := make(map[string]struct{}, len(types))
+	for _, definition := range types {
+		known[definition.ID] = struct{}{}
+	}
+	for index := range notes {
+		if _, exists := known[notes[index].Type]; !exists {
+			notes[index].Type = "general"
+		}
+	}
+	return notes, nil
 }
 
 // ListNotesPage serves a sorted/filtered/paginated page of note summaries from
@@ -1020,6 +1040,7 @@ func (s *Service) GraphQuery(ctx context.Context, input GraphQueryDTO) (GraphDTO
 	}
 	g, err := graphStore.Query(ctx, domain.GraphQuery{
 		Seed:                 seed,
+		MetadataSeed:         input.MetadataSeed,
 		Depth:                input.Depth,
 		Types:                input.Types,
 		Tags:                 tags(input.Tags),
@@ -1742,7 +1763,7 @@ func graphLayoutPath(root string) string {
 
 func defaultSettings() Settings {
 	return Settings{
-		Version: 1,
+		Version: 2,
 		Appearance: AppearanceSettings{
 			Theme: "dark",
 		},
@@ -1760,7 +1781,11 @@ func defaultSettings() Settings {
 
 func normalizeSettings(settings Settings) Settings {
 	defaults := defaultSettings()
+	needsGeneralTypeMigration := settings.Version < 2
 	if settings.Version <= 0 {
+		settings.Version = defaults.Version
+	}
+	if settings.Version < defaults.Version {
 		settings.Version = defaults.Version
 	}
 	if settings.Appearance.Theme != "light" && settings.Appearance.Theme != "dark" {
@@ -1788,6 +1813,9 @@ func normalizeSettings(settings Settings) Settings {
 			continue
 		}
 		normalizedWorkspaceSettings := normalizeWorkspaceSettings(workspaceSettings)
+		if needsGeneralTypeMigration && !containsString(normalizedWorkspaceSettings.EnabledTypes, "general") {
+			normalizedWorkspaceSettings.EnabledTypes = append([]string{"general"}, normalizedWorkspaceSettings.EnabledTypes...)
+		}
 		if trimmedPath != path {
 			delete(settings.Workspaces, path)
 		}
@@ -1799,6 +1827,9 @@ func normalizeSettings(settings Settings) Settings {
 func normalizeWorkspaceSettings(settings WorkspaceSettings) WorkspaceSettings {
 	defaults := defaultWorkspaceSettings()
 	settings.DefaultType = strings.TrimSpace(settings.DefaultType)
+	if settings.DefaultType == "concept" {
+		settings.DefaultType = "term"
+	}
 	if settings.DefaultType == "" {
 		settings.DefaultType = defaults.DefaultType
 	}
@@ -1842,9 +1873,10 @@ func normalizeWorkspaceSettings(settings WorkspaceSettings) WorkspaceSettings {
 
 func defaultWorkspaceSettings() WorkspaceSettings {
 	return WorkspaceSettings{
-		DefaultType: "concept",
+		DefaultType: "term",
 		EnabledTypes: []string{
-			"concept",
+			"general",
+			"term",
 			"adr",
 			"service",
 			"entity",
@@ -1865,6 +1897,9 @@ func normalizeTypeList(values []string) []string {
 	seen := map[string]struct{}{}
 	for _, value := range values {
 		value = strings.TrimSpace(value)
+		if value == "concept" {
+			value = "term"
+		}
 		if value == "" {
 			continue
 		}

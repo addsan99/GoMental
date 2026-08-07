@@ -48,7 +48,7 @@ export function edgeLinkType(kind: string): LinkType {
   return 'hard';
 }
 
-export function buildData(dto: application.GraphDTO, selectedID: string, flat: boolean): GraphData {
+export function buildData(dto: application.GraphDTO, selectedGraphID: string, flat: boolean): GraphData {
   const degree: Record<string, number> = {};
   for (const edge of dto.edges) {
     degree[edge.source] = (degree[edge.source] || 0) + 1;
@@ -57,7 +57,7 @@ export function buildData(dto: application.GraphDTO, selectedID: string, flat: b
 
   const nodes: GraphNode[] = dto.nodes.map((node) => {
     const noteID = node.noteId || (node.kind === 'note' ? node.id : undefined);
-    const selected = Boolean(noteID && noteID === selectedID);
+    const selected = Boolean(selectedGraphID && (node.id === selectedGraphID || noteID === selectedGraphID));
     const deg = degree[node.id] || 0;
     // Logarithmic bump so well-connected nodes read as bigger (caps out so a
     // single super-hub doesn't dominate). Widened vs. the original so the size

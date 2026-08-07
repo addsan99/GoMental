@@ -136,3 +136,64 @@ func TestMetadataMembershipsEmptyNote(t *testing.T) {
 		t.Fatalf("expected no memberships for empty note, got %#v", m)
 	}
 }
+
+func TestMetadataMembershipsSkipTitleHeading(t *testing.T) {
+	note := metaNote("israeli-style-schnitzel", "recipe", nil, []string{"Israeli Style Schnitzel", "Ingredients"})
+	note.Title = "Israeli Style Schnitzel"
+
+	memberships := MetadataMemberships(note)
+	for _, membership := range memberships {
+		if membership.HubKey == "heading:israeli style schnitzel" {
+			t.Fatalf("title-equivalent heading hub should be skipped, got %#v", memberships)
+		}
+	}
+	if !hasMembership(memberships, "heading:ingredients") {
+		t.Fatalf("section heading hub should remain, got %#v", memberships)
+	}
+}
+
+func TestGraphReadsHideStoredTitleHeadingHub(t *testing.T) {
+	ctx := context.Background()
+	store := openStore(t, GraphPath(t.TempDir()))
+	if err := store.UpsertNoteMeta(ctx, NoteMeta{ID: "israeli-style-schnitzel", Title: "Israeli Style Schnitzel"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.ReplaceMetadataLinks(ctx, "israeli-style-schnitzel", []MetadataMembership{
+		{Strength: domain.LinkStrengthHeading, HubKey: "heading:israeli style schnitzel"},
+		{Strength: domain.LinkStrengthHeading, HubKey: "heading:ingredients"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	full, err := store.FullGraph(ctx, domain.GraphFilter{IncludeMetadataLinks: true})
+	if err != nil {
+		t.Fatalf("full graph: %v", err)
+	}
+	if hasNode(full, "heading:israeli style schnitzel") {
+		t.Fatalf("full graph should hide title-equivalent heading hub, got %#v", full.Nodes)
+	}
+	if !hasNode(full, "heading:ingredients") {
+		t.Fatalf("full graph should keep section heading hub, got %#v", full.Nodes)
+	}
+
+	seed := domain.NoteID("israeli-style-schnitzel")
+	query, err := store.Query(ctx, domain.GraphQuery{Seed: &seed, Depth: 1, IncludeMetadataLinks: true})
+	if err != nil {
+		t.Fatalf("query graph: %v", err)
+	}
+	if hasNode(query, "heading:israeli style schnitzel") {
+		t.Fatalf("query should hide title-equivalent heading hub, got %#v", query.Nodes)
+	}
+	if !hasNode(query, "heading:ingredients") {
+		t.Fatalf("query should keep section heading hub, got %#v", query.Nodes)
+	}
+}
+
+func hasMembership(memberships []MetadataMembership, hubKey string) bool {
+	for _, membership := range memberships {
+		if membership.HubKey == hubKey {
+			return true
+		}
+	}
+	return false
+}

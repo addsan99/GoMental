@@ -35,7 +35,11 @@ func (m *noteMeta) toParsed() domain.ParsedOKFNote {
 // headingKey normalizes a heading to the key sharedHeadings historically compared
 // on (lowercase, no trim). Used by the heading metadata facet (facets.go).
 func headingKey(h domain.Heading) string {
-	return strings.ToLower(h.Text)
+	return headingTextKey(h.Text)
+}
+
+func headingTextKey(text string) string {
+	return strings.ToLower(text)
 }
 
 // CorpusIndex is an in-memory projection of a note corpus supporting exact,

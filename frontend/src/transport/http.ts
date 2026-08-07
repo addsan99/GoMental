@@ -1,6 +1,6 @@
 // HTTP transport: fetch-based implementation of the binding surface for browser (server) mode.
 import type {application, main} from '../../wailsjs/go/models'
-import type {GitPRResult, GitSyncResult, GoMentalSettings, MoveNoteRequest, NoteDTOWithVersion, SaveNoteRequestWithVersion, SetNoteFavoriteRequest} from './types'
+import type {GitPRResult, GitSyncResult, GoMentalSettings, MoveNoteRequest, NoteDTOWithVersion, NoteType, SaveNoteRequestWithVersion, SetNoteFavoriteRequest} from './types'
 import {subscribe} from './events'
 
 // The generated App.d.ts references application.UIState, which is not defined in
@@ -210,6 +210,11 @@ export function Info(): Promise<main.AppInfo> {
 export function GitSync(): Promise<GitSyncResult> {
   return request('/api/git/sync', {method: 'POST'})
 }
+
+export function ListNoteTypes(): Promise<NoteType[]> { return request('/api/note-types') }
+export function SaveNoteType(definition: NoteType): Promise<NoteType> { return request(`/api/note-types/${encodeURIComponent(definition.id)}`, {method: 'PUT', ...jsonBody(definition)}) }
+export function DeleteNoteType(id: string): Promise<void> { return request(`/api/note-types/${encodeURIComponent(id)}`, {method: 'DELETE'}) }
+export function ImportNoteTypeCollection(content: string): Promise<NoteType[]> { return request('/api/note-types/import', {method: 'POST', ...jsonBody({content})}) }
 
 export function GitOpenPullRequest(): Promise<GitPRResult> {
   return Promise.reject(new Error('writable git pull requests are only available in the desktop app'))
