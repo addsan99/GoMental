@@ -442,7 +442,7 @@ func TestServiceSettingsAreAppLevel(t *testing.T) {
 		t.Fatalf("unexpected default settings: %#v", settings)
 	}
 
-	settings.Appearance.Theme = "light"
+	settings.Appearance.Theme = "vscode-tokyo-night"
 	settings.NoteView.DefaultEditMode = "source"
 	settings.NoteView.ShowFindBar = false
 	settings.GraphView.DefaultMode = "3d"
@@ -462,7 +462,7 @@ func TestServiceSettingsAreAppLevel(t *testing.T) {
 	if err != nil {
 		t.Fatalf("load saved settings: %v", err)
 	}
-	if loaded.Appearance.Theme != "light" || loaded.NoteView.DefaultEditMode != "source" || loaded.NoteView.ShowFindBar || loaded.GraphView.DefaultMode != "3d" || loaded.GraphView.DefaultDepth != 4 {
+	if loaded.Appearance.Theme != "vscode-tokyo-night" || loaded.NoteView.DefaultEditMode != "source" || loaded.NoteView.ShowFindBar || loaded.GraphView.DefaultMode != "3d" || loaded.GraphView.DefaultDepth != 4 {
 		t.Fatalf("unexpected saved settings: %#v", loaded)
 	}
 	workspaceSettings, ok := loaded.Workspaces["C:/Knowledge"]

@@ -106,6 +106,35 @@ export type GoMentalWorkspaceSettings = {
   gitUsername: string
   gitToken: string
   gitExitAction: 'none' | 'prompt' | 'autoPr' | 'autoMerge'
+  suggestedLinks: {
+    mode: 'off' | 'prompt' | 'automatic'
+    trigger: 'whileEditing' | 'onSave'
+    placement: 'relatedSection' | 'preferInline'
+    minScore: number
+    maxSuggestions: number
+  }
+}
+
+export type SuggestLinksRequest = {
+  id: string
+  content: string
+  limit: number
+  minScore: number
+}
+
+export type LinkSuggestion = {
+  targetId: string
+  targetTitle: string
+  score: number
+  confidence: 'possible' | 'strong' | 'high'
+  evidence: Array<{kind: string; detail: string; weight: number}>
+  defaultPlacement: 'relatedSection'
+}
+
+export type SuggestLinksResponse = {
+  draftHash: string
+  algorithm: string
+  items: LinkSuggestion[]
 }
 
 export type NoteType = {

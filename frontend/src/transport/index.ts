@@ -41,6 +41,7 @@ export const SaveNoteAsset = impl.SaveNoteAsset
 export const SaveUIState = impl.SaveUIState
 export const SaveSettings = impl.SaveSettings
 export const Search = impl.Search
+export const SuggestLinks = impl.SuggestLinks
 export const SetNoteFavorite = impl.SetNoteFavorite
 export const SelectWorkspaceDirectory = impl.SelectWorkspaceDirectory
 export const onEvent = impl.onEvent

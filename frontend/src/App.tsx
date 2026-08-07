@@ -62,12 +62,13 @@ import {
   SaveSettings,
   SaveUIState,
   Search,
+  SuggestLinks,
   SetNoteFavorite,
   SelectWorkspaceDirectory,
   onEvent,
 } from './transport';
 import type {application} from '../wailsjs/go/models';
-import type {AppInfoWithMode, GoMentalSettings, GoMentalWorkspaceSettings, NoteDTOWithVersion, NoteType} from './transport/types';
+import type {AppInfoWithMode, GoMentalSettings, GoMentalWorkspaceSettings, LinkSuggestion, NoteDTOWithVersion, NoteType} from './transport/types';
 import {CSS_VARIABLE_NAMES, cssVariablesForTheme, loadVSCodeTheme} from './themes/vscode';
 import {themeOption, vscodeThemeOptions} from './themes/catalog';
 
@@ -124,7 +125,7 @@ const emptyInfo: AppInfoWithMode = {
 };
 
 const DEFAULT_SETTINGS: GoMentalSettings = {
-  version: 2,
+  version: 3,
   appearance: {
     theme: 'dark',
   },
@@ -151,6 +152,9 @@ function App() {
   const [saveState, setSaveState] = useState<SaveState>('idle');
   const [isEditing, setIsEditing] = useState(false);
   const [backlinks, setBacklinks] = useState<application.NoteLinkDTO[]>([]);
+  const [linkSuggestions, setLinkSuggestions] = useState<LinkSuggestion[]>([]);
+  const [suggestionsStatus, setSuggestionsStatus] = useState<'idle' | 'loading' | 'ready' | 'error'>('idle');
+  const [saveSuggestionReview, setSaveSuggestionReview] = useState<{content: string; items: LinkSuggestion[]; exitEditMode: boolean} | null>(null);
   const [noteVersion, setNoteVersion] = useState<string>('');
   const [conflictOpen, setConflictOpen] = useState(false);
   const [deletedNotice, setDeletedNotice] = useState('');
@@ -236,12 +240,17 @@ function App() {
   const openWorkspaceMenuRef = useRef<HTMLDivElement | null>(null);
   const searchRequestRef = useRef(0);
   const noteRequestRef = useRef(0);
+  const backlinksRequestRef = useRef(0);
+  const workspaceEpochRef = useRef(0);
+  const selectedIDRef = useRef('');
   const initialLoadRef = useRef(false);
   const graphReloadTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const savedFlashTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const articleScrollRef = useRef<HTMLDivElement | null>(null);
   const pendingEditNoteRef = useRef('');
+  const suggestionRequestRef = useRef(0);
+  const reviewedSuggestionDraftRef = useRef('');
 
   const showToast = useCallback((message: string) => {
     setToastMsg(message);
@@ -276,6 +285,31 @@ function App() {
 
   const loadRecent = useCallback(async () => {
     setRecent(await RecentWorkspaces());
+  }, []);
+
+  const fetchCurrentBacklinks = useCallback(async (id: string) => {
+    const requestID = backlinksRequestRef.current + 1;
+    backlinksRequestRef.current = requestID;
+    const workspaceEpoch = workspaceEpochRef.current;
+    try {
+      const links = await Backlinks(id);
+      if (
+        backlinksRequestRef.current !== requestID ||
+        workspaceEpochRef.current !== workspaceEpoch ||
+        selectedIDRef.current !== id
+      ) {
+        return null;
+      }
+      return links;
+    } catch (err) {
+      // A request invalidated by a note/workspace switch is expected to fail if
+      // the old graph store closes while it is in flight. Do not surface that
+      // failure in the newly opened workspace.
+      if (backlinksRequestRef.current !== requestID || workspaceEpochRef.current !== workspaceEpoch) {
+        return null;
+      }
+      throw err;
+    }
   }, []);
 
   // Re-fetch /api/info so the git status chip (ref/commit/lastSyncAt/error)
@@ -336,6 +370,7 @@ function App() {
     setNotes(items);
     setWorkspace((current) => current ? {...current, noteCount: items.length} : current);
     const nextID = preferredID || items[0]?.id || '';
+    selectedIDRef.current = nextID;
     setSelectedID(nextID);
     return {items, nextID};
   }, []);
@@ -346,6 +381,20 @@ function App() {
     }
     setBusy('Opening workspace');
     setError('');
+    // Invalidate every note-scoped request before the backend swaps graph
+    // stores. Otherwise a backlink response from the previous workspace can
+    // arrive late and repopulate the rail after it has been cleared.
+    workspaceEpochRef.current += 1;
+    noteRequestRef.current += 1;
+    backlinksRequestRef.current += 1;
+    suggestionRequestRef.current += 1;
+    selectedIDRef.current = '';
+    setSelectedID('');
+    setSelectedNote(null);
+    setDraft('');
+    setSavedContent('');
+    setBacklinks([]);
+    setNotes([]);
     setSearchResults([]);
     setSearchStatus('idle');
     try {
@@ -530,7 +579,9 @@ function App() {
         setNoteVersion(incomingVersion);
         setSaveState('saved');
         setConflictOpen(false);
-        void Backlinks(payload.id).then(setBacklinks).catch((err) => setError(errorMessage(err)));
+        void fetchCurrentBacklinks(payload.id)
+          .then((links) => { if (links !== null) setBacklinks(links); })
+          .catch((err) => setError(errorMessage(err)));
         return;
       }
       if (!isDirty && !isEditing) {
@@ -541,7 +592,9 @@ function App() {
         setNoteVersion(incomingVersion);
         setSaveState('saved');
         setConflictOpen(false);
-        void Backlinks(payload.id).then(setBacklinks).catch((err) => setError(errorMessage(err)));
+        void fetchCurrentBacklinks(payload.id)
+          .then((links) => { if (links !== null) setBacklinks(links); })
+          .catch((err) => setError(errorMessage(err)));
       } else {
         // Someone else changed the open note while we have unsaved edits.
         setSaveState('conflict');
@@ -599,7 +652,7 @@ function App() {
       offGitMerged();
       offGitError();
     };
-  }, [draft, isEditing, loadNotes, noteVersion, refreshInfo, savedContent, selectedID, showToast]);
+  }, [draft, fetchCurrentBacklinks, isEditing, loadNotes, noteVersion, refreshInfo, savedContent, selectedID, showToast]);
 
   useEffect(() => {
     if (initialLoadRef.current) {
@@ -660,6 +713,8 @@ function App() {
   useEffect(() => {
     const requestID = noteRequestRef.current + 1;
     noteRequestRef.current = requestID;
+    backlinksRequestRef.current += 1;
+    selectedIDRef.current = selectedID;
     setSelectedNote(null);
     setDraft('');
     setSavedContent('');
@@ -684,7 +739,7 @@ function App() {
       setError('');
       try {
         const noteID = selectedID;
-        const [note, links] = await Promise.all([ReadNote(noteID), Backlinks(noteID)]);
+        const [note, links] = await Promise.all([ReadNote(noteID), fetchCurrentBacklinks(noteID)]);
         if (noteRequestRef.current !== requestID || note.id !== noteID) {
           return;
         }
@@ -693,7 +748,9 @@ function App() {
         setSavedContent(note.content);
         setSaveState('saved');
         setNoteVersion(note.version ?? '');
-        setBacklinks(links);
+        if (links !== null) {
+          setBacklinks(links);
+        }
         if (pendingEditNoteRef.current === noteID) {
           pendingEditNoteRef.current = '';
           setIsEditing(true);
@@ -708,7 +765,7 @@ function App() {
         }
       }
     })();
-  }, [selectedID, workspace?.root, theme]);
+  }, [fetchCurrentBacklinks, selectedID, workspace?.root, theme]);
 
   const saveImageAsset = useCallback(async (file: File): Promise<string> => {
     if (!selectedID) {
@@ -737,11 +794,11 @@ function App() {
     savedFlashTimerRef.current = setTimeout(() => setSavedFlash(false), 1500);
   }, []);
 
-  const saveCurrentNote = useCallback(async (exitEditMode = false, force = false) => {
+  const saveCurrentNote = useCallback(async (exitEditMode = false, force = false, contentOverride?: string) => {
     if (!selectedID || !selectedNote || saveState === 'saving' || info.readOnly || workspaceIsReadOnly(settings, workspace?.root || '')) {
       return;
     }
-    const contentToSave = force ? draft : (isEditing ? draft : (mdxEditorRef.current?.currentContent() ?? draft));
+    let contentToSave = contentOverride ?? (force ? draft : (isEditing ? draft : (mdxEditorRef.current?.currentContent() ?? draft)));
     if (contentToSave !== draft) {
       setDraft(contentToSave);
     }
@@ -751,6 +808,32 @@ function App() {
         setRawMode(false);
       }
       return;
+    }
+    const suggestionSettings = workspaceSettingsFor(settings, workspace?.root || '').suggestedLinks;
+    if (!force && suggestionSettings.mode !== 'off' && suggestionSettings.trigger === 'onSave' && reviewedSuggestionDraftRef.current !== contentToSave) {
+      try {
+        const response = await SuggestLinks({
+          id: selectedID,
+          content: contentToSave,
+          limit: suggestionSettings.maxSuggestions,
+          minScore: suggestionSettings.minScore,
+        });
+        if (suggestionSettings.mode === 'prompt' && response.items.length > 0) {
+          setSaveSuggestionReview({content: contentToSave, items: response.items, exitEditMode});
+          return;
+        }
+        if (suggestionSettings.mode === 'automatic') {
+          const accepted = response.items.filter(isAutomaticSuggestion).slice(0, 3);
+          if (accepted.length > 0) {
+            contentToSave = addRelatedNoteLinks(contentToSave, accepted);
+            setDraft(contentToSave);
+            showToast(`Adding ${accepted.length} high-confidence link${accepted.length === 1 ? '' : 's'}`);
+          }
+        }
+        reviewedSuggestionDraftRef.current = contentToSave;
+      } catch {
+        // Suggestion generation is advisory and must never block an explicit save.
+      }
     }
     setSaveState('saving');
     setError('');
@@ -766,8 +849,10 @@ function App() {
         setIsEditing(false);
         setRawMode(false);
       }
-      const [, links] = await Promise.all([loadNotes(saved.id), Backlinks(saved.id)]);
-      setBacklinks(links);
+      const [, links] = await Promise.all([loadNotes(saved.id), fetchCurrentBacklinks(saved.id)]);
+      if (links !== null) {
+        setBacklinks(links);
+      }
       flashSaved();
       showToast('Saved to disk');
     } catch (err) {
@@ -779,7 +864,7 @@ function App() {
       setSaveState('dirty');
       setError(errorMessage(err));
     }
-  }, [draft, flashSaved, info.readOnly, isEditing, loadNotes, noteVersion, savedContent, saveState, selectedID, selectedNote, settings, showToast, workspace?.root]);
+  }, [draft, fetchCurrentBacklinks, flashSaved, info.readOnly, isEditing, loadNotes, noteVersion, savedContent, saveState, selectedID, selectedNote, settings, showToast, workspace?.root]);
 
   const deleteCurrentNote = useCallback(async () => {
     if (!selectedID || !selectedNote || info.readOnly || workspaceIsReadOnly(settings, workspace?.root || '') || busy || projectionActive) {
@@ -883,7 +968,7 @@ function App() {
     }
     setError('');
     try {
-      const [note, links] = await Promise.all([ReadNote(selectedID), Backlinks(selectedID)]);
+      const [note, links] = await Promise.all([ReadNote(selectedID), fetchCurrentBacklinks(selectedID)]);
       if (note.id !== selectedID) {
         return;
       }
@@ -892,12 +977,14 @@ function App() {
       setSavedContent(note.content);
       setNoteVersion(note.version ?? '');
       setSaveState('saved');
-      setBacklinks(links);
+      if (links !== null) {
+        setBacklinks(links);
+      }
       setConflictOpen(false);
     } catch (err) {
       setError(errorMessage(err));
     }
-  }, [selectedID]);
+  }, [fetchCurrentBacklinks, selectedID]);
 
   const overwriteConflict = useCallback(() => {
     void saveCurrentNote(false, true);
@@ -955,6 +1042,41 @@ function App() {
     setDraft(next);
     setSaveState(next === savedContent ? 'saved' : 'dirty');
   }, [savedContent]);
+
+  useEffect(() => {
+    const suggestionSettings = workspaceSettingsFor(settings, workspace?.root || '').suggestedLinks;
+    const requestID = suggestionRequestRef.current + 1;
+    suggestionRequestRef.current = requestID;
+    if (!isEditing || !selectedID || suggestionSettings.mode === 'off' || suggestionSettings.trigger !== 'whileEditing' || draft.replace(/^---[\s\S]*?---/, '').trim().length < 80) {
+      setLinkSuggestions([]);
+      setSuggestionsStatus('idle');
+      return;
+    }
+    setSuggestionsStatus('loading');
+    const timer = window.setTimeout(() => {
+      void SuggestLinks({id: selectedID, content: draft, limit: suggestionSettings.maxSuggestions, minScore: suggestionSettings.minScore})
+        .then((response) => {
+          if (suggestionRequestRef.current !== requestID) return;
+          setLinkSuggestions(response.items);
+          setSuggestionsStatus('ready');
+        })
+        .catch(() => {
+          if (suggestionRequestRef.current !== requestID) return;
+          setLinkSuggestions([]);
+          setSuggestionsStatus('error');
+        });
+    }, 1000);
+    return () => window.clearTimeout(timer);
+  }, [draft, isEditing, selectedID, settings, workspace?.root]);
+
+  const addSuggestionsToDraft = useCallback((items: LinkSuggestion[]) => {
+    if (items.length === 0) return;
+    const next = addRelatedNoteLinks(draft, items);
+    setDraft(next);
+    setSaveState('dirty');
+    setLinkSuggestions((current) => current.filter((item) => !items.some((accepted) => accepted.targetId === item.targetId)));
+    showToast(`Added ${items.length} related link${items.length === 1 ? '' : 's'} to draft`);
+  }, [draft, showToast]);
 
   const navigateToNote = useCallback((id: string) => {
     const resolved = resolveLinkedNoteID(id, selectedID, notes);
@@ -1227,6 +1349,12 @@ function App() {
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
     document.documentElement.dataset.accent = 'iris';
+    try {
+      localStorage.setItem('gm-theme', theme);
+    } catch {
+      // The app-level settings file remains authoritative if browser storage is
+      // unavailable; local storage only prevents a default-theme flash.
+    }
   }, [theme]);
 
   // Persist the pane layout preferences.
@@ -2036,6 +2164,39 @@ function App() {
                 )}
               </div>
 
+              {isEditing && suggestionsStatus !== 'idle' && (
+                <div className="gm-rail-block">
+                  <div className="gm-rail-heading">
+                    <span className="gm-section-title">Suggested links</span>
+                    <span className="gm-pill">{linkSuggestions.length}</span>
+                  </div>
+                  {suggestionsStatus === 'loading' ? (
+                    <div className="gm-rail-empty">Finding related notes…</div>
+                  ) : suggestionsStatus === 'error' ? (
+                    <div className="gm-rail-empty">Suggestions unavailable.</div>
+                  ) : linkSuggestions.length > 0 ? (
+                    <div className="gm-suggestions">
+                      {linkSuggestions.map((suggestion) => (
+                        <div className="gm-suggestion-card" key={suggestion.targetId}>
+                          <div className="gm-suggestion-preview">
+                            <strong>{suggestion.targetTitle || basename(suggestion.targetId)}</strong>
+                            <span>{suggestionConfidenceLabel(suggestion)}</span>
+                          </div>
+                          <small>{suggestionEvidenceLabel(suggestion)}</small>
+                          <div className="gm-suggestion-actions">
+                            <button type="button" className="gm-btn gm-btn-sm" onClick={() => setLinkSuggestions((current) => current.filter((item) => item.targetId !== suggestion.targetId))}>Reject</button>
+                            <button type="button" className="gm-btn gm-btn-sm gm-btn-primary" onClick={() => addSuggestionsToDraft([suggestion])}>Add</button>
+                          </div>
+                        </div>
+                      ))}
+                      <button type="button" className="gm-btn gm-btn-primary gm-suggestion-add-all" onClick={() => addSuggestionsToDraft(linkSuggestions)}>Add all</button>
+                    </div>
+                  ) : (
+                    <div className="gm-rail-empty">No related notes found.</div>
+                  )}
+                </div>
+              )}
+
               <div className="gm-rail-block">
                 <div className="gm-rail-heading">
                   <span className="gm-section-title">Backlinks</span>
@@ -2080,6 +2241,26 @@ function App() {
 
       <CommandPalette open={paletteOpen} notes={notes} onClose={() => setPaletteOpen(false)} onSelect={selectFromPalette} />
       <LinkPicker open={linkPickerOpen} notes={notes} onClose={() => setLinkPickerOpen(false)} onPick={insertLink} />
+      {saveSuggestionReview && (
+        <SuggestedLinksReview
+          review={saveSuggestionReview}
+          onCancel={() => setSaveSuggestionReview(null)}
+          onSaveWithout={() => {
+            reviewedSuggestionDraftRef.current = saveSuggestionReview.content;
+            const pending = saveSuggestionReview;
+            setSaveSuggestionReview(null);
+            void saveCurrentNote(pending.exitEditMode, false, pending.content);
+          }}
+          onApply={(items) => {
+            const pending = saveSuggestionReview;
+            const next = addRelatedNoteLinks(pending.content, items);
+            reviewedSuggestionDraftRef.current = next;
+            setDraft(next);
+            setSaveSuggestionReview(null);
+            void saveCurrentNote(pending.exitEditMode, false, next);
+          }}
+        />
+      )}
       <SettingsModal
         open={settingsOpen}
         settings={settings}
@@ -2151,6 +2332,53 @@ function DetailRow({label, value}: {label: string; value: string}) {
     <div className="gm-detail-row">
       <span className="gm-detail-label">{label}</span>
       <span className="gm-detail-value">{value}</span>
+    </div>
+  );
+}
+
+function SuggestedLinksReview({
+  review,
+  onCancel,
+  onSaveWithout,
+  onApply,
+}: {
+  review: {content: string; items: LinkSuggestion[]; exitEditMode: boolean};
+  onCancel: () => void;
+  onSaveWithout: () => void;
+  onApply: (items: LinkSuggestion[]) => void;
+}) {
+  const [selected, setSelected] = useState(() => new Set(review.items.map((item) => item.targetId)));
+  const accepted = review.items.filter((item) => selected.has(item.targetId));
+  return (
+    <div className="gm-settings-scrim" role="presentation" onClick={onCancel}>
+      <div className="gm-suggestion-review" role="dialog" aria-modal="true" aria-label="Review suggested links" onClick={(event) => event.stopPropagation()}>
+        <div className="gm-settings-header">
+          <div><h2>Suggested links</h2><p>Choose which related notes to add before saving.</p></div>
+          <button type="button" className="gm-icon-btn" onClick={onCancel} aria-label="Cancel"><CloseIcon size={18} /></button>
+        </div>
+        <div className="gm-suggestion-review-list">
+          {review.items.map((suggestion) => (
+            <label className="gm-suggestion-review-row" key={suggestion.targetId}>
+              <input
+                type="checkbox"
+                checked={selected.has(suggestion.targetId)}
+                onChange={(event) => setSelected((current) => {
+                  const next = new Set(current);
+                  if (event.target.checked) next.add(suggestion.targetId); else next.delete(suggestion.targetId);
+                  return next;
+                })}
+              />
+              <span><strong>{suggestion.targetTitle || basename(suggestion.targetId)}</strong><small>{suggestionEvidenceLabel(suggestion)}</small></span>
+              <em>{suggestionConfidenceLabel(suggestion)}</em>
+            </label>
+          ))}
+        </div>
+        <div className="gm-suggestion-review-actions">
+          <button type="button" className="gm-btn" onClick={onCancel}>Cancel</button>
+          <button type="button" className="gm-btn" onClick={onSaveWithout}>Save without links</button>
+          <button type="button" className="gm-btn gm-btn-primary" disabled={accepted.length === 0} onClick={() => onApply(accepted)}>Add selected &amp; save ({accepted.length})</button>
+        </div>
+      </div>
     </div>
   );
 }
@@ -2603,6 +2831,56 @@ function SettingsModal({
                             </label>
                           </>
                         )}
+                        <div className="gm-setting-block">
+                          <div>
+                            <strong>Suggested links</strong>
+                            <small>Find related notes locally and add accepted results as Markdown links.</small>
+                          </div>
+                          <label className="gm-setting-row">
+                            <span><strong>Behavior</strong></span>
+                            <select
+                              value={selectedWorkspaceSettings.suggestedLinks.mode}
+                              onChange={(event) => updateSelectedWorkspaceSettings({
+                                ...selectedWorkspaceSettings,
+                                suggestedLinks: {...selectedWorkspaceSettings.suggestedLinks, mode: event.target.value as GoMentalWorkspaceSettings['suggestedLinks']['mode']},
+                              })}
+                            >
+                              <option value="off">Off</option>
+                              <option value="prompt">Ask before adding</option>
+                              <option value="automatic">Add high-confidence links</option>
+                            </select>
+                          </label>
+                          {selectedWorkspaceSettings.suggestedLinks.mode !== 'off' && (
+                            <>
+                              <label className="gm-setting-row">
+                                <span><strong>Check for links</strong></span>
+                                <select
+                                  value={selectedWorkspaceSettings.suggestedLinks.trigger}
+                                  onChange={(event) => updateSelectedWorkspaceSettings({
+                                    ...selectedWorkspaceSettings,
+                                    suggestedLinks: {...selectedWorkspaceSettings.suggestedLinks, trigger: event.target.value as GoMentalWorkspaceSettings['suggestedLinks']['trigger']},
+                                  })}
+                                >
+                                  <option value="whileEditing">While editing</option>
+                                  <option value="onSave">When saving</option>
+                                </select>
+                              </label>
+                              <label className="gm-setting-row">
+                                <span><strong>Maximum suggestions</strong></span>
+                                <input
+                                  type="number"
+                                  min={1}
+                                  max={10}
+                                  value={selectedWorkspaceSettings.suggestedLinks.maxSuggestions}
+                                  onChange={(event) => updateSelectedWorkspaceSettings({
+                                    ...selectedWorkspaceSettings,
+                                    suggestedLinks: {...selectedWorkspaceSettings.suggestedLinks, maxSuggestions: Number(event.target.value)},
+                                  })}
+                                />
+                              </label>
+                            </>
+                          )}
+                        </div>
                       </>
                     ) : (
                       <div className="gm-workspace-empty gm-workspace-empty-large">Choose or browse for a workspace to configure it.</div>
@@ -3024,7 +3302,7 @@ function normalizeSettings(value: GoMentalSettings): GoMentalSettings {
     workspaces[trimmedPath] = normalizedWorkspaceSettings;
   }
   return {
-    version: 2,
+    version: 3,
     appearance: {theme},
     noteView: {
       defaultEditMode,
@@ -3084,6 +3362,13 @@ function defaultWorkspaceSettings(): GoMentalWorkspaceSettings {
     gitUsername: '',
     gitToken: '',
     gitExitAction: 'none',
+    suggestedLinks: {
+      mode: 'off',
+      trigger: 'onSave',
+      placement: 'relatedSection',
+      minScore: 0.45,
+      maxSuggestions: 5,
+    },
   };
 }
 
@@ -3108,11 +3393,62 @@ function normalizeWorkspaceSettings(value: GoMentalWorkspaceSettings): GoMentalW
     gitUsername: accessMode === 'writableGit' ? (value?.gitUsername || '').trim() : '',
     gitToken: accessMode === 'writableGit' ? (value?.gitToken || '').trim() : '',
     gitExitAction: accessMode === 'writableGit' ? gitExitAction : 'none',
+    suggestedLinks: {
+      mode: value?.suggestedLinks?.mode === 'prompt' || value?.suggestedLinks?.mode === 'automatic' ? value.suggestedLinks.mode : 'off',
+      trigger: value?.suggestedLinks?.trigger === 'whileEditing' ? 'whileEditing' : 'onSave',
+      placement: value?.suggestedLinks?.placement === 'preferInline' ? 'preferInline' : 'relatedSection',
+      minScore: clamp(Number(value?.suggestedLinks?.minScore) || 0.45, 0.30, 0.95),
+      maxSuggestions: clamp(Math.round(Number(value?.suggestedLinks?.maxSuggestions) || 5), 1, 10),
+    },
   };
 }
 
 function ensureEnabledType(enabledTypes: string[], type: string): string[] {
   return enabledTypes.includes(type) ? enabledTypes : [type, ...enabledTypes];
+}
+
+function isAutomaticSuggestion(suggestion: LinkSuggestion): boolean {
+  if (suggestion.score < 0.85) return false;
+  const families = new Set(suggestion.evidence.map((item) => item.kind));
+  return families.has('title_mention') || families.size >= 2;
+}
+
+function suggestionConfidenceLabel(suggestion: LinkSuggestion): string {
+  if (suggestion.confidence === 'high') return 'High confidence';
+  if (suggestion.confidence === 'strong') return 'Strong';
+  return 'Possible';
+}
+
+function suggestionEvidenceLabel(suggestion: LinkSuggestion): string {
+  const labels: string[] = [];
+  for (const evidence of suggestion.evidence) {
+    if (evidence.kind === 'title_mention') labels.push('Mentioned in this note');
+    else if (evidence.kind === 'lexical_similarity') labels.push('Similar content');
+    else if (evidence.kind === 'shared_tag') labels.push(`Shares #${evidence.detail}`);
+    else if (evidence.kind === 'shared_link') labels.push(`Both link to ${evidence.detail}`);
+    else if (evidence.kind === 'shared_type') labels.push(`Same type: ${evidence.detail}`);
+  }
+  return Array.from(new Set(labels)).slice(0, 2).join(' · ') || 'Related note';
+}
+
+function addRelatedNoteLinks(content: string, suggestions: LinkSuggestion[]): string {
+  const additions = suggestions.filter((suggestion) => {
+    const target = suggestion.targetId.replace(/^\/+|\.md$/gi, '');
+    const encoded = target.split('/').map(encodeURIComponent).join('/');
+    return !content.includes(`(/${encoded}.md)`) && !content.includes(`[[${target}]]`) && !content.includes(`[[${target}|`);
+  });
+  if (additions.length === 0) return content;
+  const lines = additions.map((suggestion) => {
+    const target = suggestion.targetId.replace(/^\/+|\.md$/gi, '');
+    const encoded = target.split('/').map(encodeURIComponent).join('/');
+    const label = (suggestion.targetTitle || basename(target)).replace(/([\\[\]])/g, '\\$1');
+    return `- [${label}](/${encoded}.md)`;
+  });
+  const trimmed = content.replace(/\s+$/, '');
+  if (trimmed.includes('<!-- gomental:related-links -->')) {
+    return `${trimmed}\n${lines.join('\n')}\n`;
+  }
+  return `${trimmed}\n\n<!-- gomental:related-links -->\n## Related notes\n\n${lines.join('\n')}\n`;
 }
 
 // Left-pane sizing: the grid's base sidebar column is 290px; the pane is
@@ -3161,7 +3497,7 @@ function themeAppearance(theme: string): 'light' | 'dark' {
 function readStoredTheme(): ThemeMode {
   try {
     const stored = localStorage.getItem('gm-theme');
-    if (stored === 'dark' || stored === 'light') {
+    if (stored && (stored === 'dark' || stored === 'light' || themeOption(stored))) {
       return stored;
     }
   } catch {

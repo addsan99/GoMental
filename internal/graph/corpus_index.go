@@ -11,25 +11,48 @@ import (
 // candidate's Title and the source's inferText = lower(PlainText+" "+Body) — the
 // exact text inferEvidence scans for title mentions.
 type noteMeta struct {
-	ID         domain.NoteID
-	Title      string
-	titleLower string // trimmed + lowercased; "" when the title is blank
-	inferText  string
+	ID          domain.NoteID
+	Title       string
+	titleLower  string // trimmed + lowercased; "" when the title is blank
+	inferText   string
+	Type        string
+	Tags        []domain.Tag
+	Headings    []domain.Heading
+	LinkTargets []domain.NoteID
 }
 
 func newNoteMeta(note domain.ParsedOKFNote) *noteMeta {
+	targets := make([]domain.NoteID, 0, len(note.Links))
+	for _, link := range note.Links {
+		if link.ResolvedID != nil {
+			targets = append(targets, *link.ResolvedID)
+		}
+	}
 	return &noteMeta{
-		ID:         note.ID,
-		Title:      note.Title,
-		titleLower: strings.ToLower(strings.TrimSpace(note.Title)),
-		inferText:  strings.ToLower(note.PlainText + " " + note.Body),
+		ID:          note.ID,
+		Title:       note.Title,
+		titleLower:  strings.ToLower(strings.TrimSpace(note.Title)),
+		inferText:   strings.ToLower(note.PlainText + " " + note.Body),
+		Type:        note.Metadata.Type,
+		Tags:        append([]domain.Tag(nil), note.Tags...),
+		Headings:    append([]domain.Heading(nil), note.Headings...),
+		LinkTargets: targets,
 	}
 }
 
 func (m *noteMeta) toParsed() domain.ParsedOKFNote {
 	// PlainText carries the already-lowered inferText and Body is empty; inferEvidence
 	// re-lowers (idempotent), so the scanned text equals the original note's.
-	return domain.ParsedOKFNote{ID: m.ID, Title: m.Title, PlainText: m.inferText}
+	links := make([]domain.ParsedLink, 0, len(m.LinkTargets))
+	for _, target := range m.LinkTargets {
+		resolved := target
+		links = append(links, domain.ParsedLink{Source: m.ID, RawTarget: string(target), ResolvedID: &resolved, Strength: domain.LinkStrengthHard})
+	}
+	return domain.ParsedOKFNote{
+		ID: m.ID, Title: m.Title, PlainText: m.inferText,
+		Metadata: domain.OKFMetadata{Type: m.Type, Tags: append([]domain.Tag(nil), m.Tags...)},
+		Tags:     append([]domain.Tag(nil), m.Tags...), Headings: append([]domain.Heading(nil), m.Headings...), Links: links,
+	}
 }
 
 // headingKey normalizes a heading to the key sharedHeadings historically compared

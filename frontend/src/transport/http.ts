@@ -1,6 +1,6 @@
 // HTTP transport: fetch-based implementation of the binding surface for browser (server) mode.
 import type {application, main} from '../../wailsjs/go/models'
-import type {GitPRResult, GitSyncResult, GoMentalSettings, MoveNoteRequest, NoteDTOWithVersion, NoteType, SaveNoteRequestWithVersion, SetNoteFavoriteRequest} from './types'
+import type {GitPRResult, GitSyncResult, GoMentalSettings, MoveNoteRequest, NoteDTOWithVersion, NoteType, SaveNoteRequestWithVersion, SetNoteFavoriteRequest, SuggestLinksRequest, SuggestLinksResponse} from './types'
 import {subscribe} from './events'
 
 // The generated App.d.ts references application.UIState, which is not defined in
@@ -209,6 +209,10 @@ export function Info(): Promise<main.AppInfo> {
 
 export function GitSync(): Promise<GitSyncResult> {
   return request('/api/git/sync', {method: 'POST'})
+}
+
+export function SuggestLinks(req: SuggestLinksRequest): Promise<SuggestLinksResponse> {
+  return request('/api/link-suggestions', {method: 'POST', ...jsonBody(req)})
 }
 
 export function ListNoteTypes(): Promise<NoteType[]> { return request('/api/note-types') }

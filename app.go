@@ -381,6 +381,10 @@ func (a *App) SaveNote(req application.SaveNoteRequest) (application.NoteDTO, er
 	return dto, a.commitWritableGit("Update "+dto.ID, dto.Path)
 }
 
+func (a *App) SuggestLinks(req application.SuggestLinksRequest) (application.SuggestLinksResponse, error) {
+	return a.service().SuggestLinks(a.context(), req)
+}
+
 func (a *App) SetNoteFavorite(id string, favorite bool) (application.NoteDTO, error) {
 	if a.writesBlocked() {
 		return application.NoteDTO{}, errReadOnly

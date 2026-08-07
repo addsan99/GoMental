@@ -113,6 +113,13 @@
         "responses": { "200": { "description": "Ranked results with highlighted fragments", "content": { "application/json": { "schema": { "type": "array", "items": { "$ref": "#/components/schemas/SearchResult" } } } } } }
       }
     },
+    "/api/link-suggestions": {
+      "post": {
+        "summary": "Suggest related notes for an unsaved draft without changing it",
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "type": "object", "required": ["id", "content"], "properties": { "id": { "type": "string" }, "content": { "type": "string" }, "limit": { "type": "integer", "minimum": 1, "maximum": 10 }, "minScore": { "type": "number", "minimum": 0, "maximum": 1 } } } } } },
+        "responses": { "200": { "description": "Ranked, explainable link suggestions associated with a draft hash" } }
+      }
+    },
     "/api/graph": { "post": { "summary": "Full knowledge graph (filtered)", "responses": { "200": { "description": "OK" } } } },
     "/api/backlinks/{id}": { "get": { "summary": "Backlinks to a note", "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }], "responses": { "200": { "description": "OK" } } } },
     "/api/neighborhood/{id}": { "get": { "summary": "Local graph neighborhood", "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }, { "name": "depth", "in": "query", "schema": { "type": "integer" } }], "responses": { "200": { "description": "OK" } } } },

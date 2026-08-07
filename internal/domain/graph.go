@@ -21,6 +21,8 @@ const (
 	EvidenceSharedTag     EvidenceKind = "shared_tag"
 	EvidenceSharedType    EvidenceKind = "shared_type"
 	EvidenceSharedHeading EvidenceKind = "shared_heading"
+	EvidenceLexicalMatch  EvidenceKind = "lexical_similarity"
+	EvidenceSharedLink    EvidenceKind = "shared_link"
 )
 
 type LinkEvidence struct {

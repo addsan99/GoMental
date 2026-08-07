@@ -2,6 +2,7 @@ package application
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/base64"
 	"errors"
 	"fmt"
@@ -144,6 +145,28 @@ type SearchResultDTO struct {
 	Score     float64  `json:"score"`
 	Fragments []string `json:"fragments"`
 	Favorite  bool     `json:"favorite"`
+}
+
+type SuggestLinksRequest struct {
+	ID       string  `json:"id"`
+	Content  string  `json:"content"`
+	Limit    int     `json:"limit"`
+	MinScore float64 `json:"minScore"`
+}
+
+type LinkSuggestionDTO struct {
+	TargetID         string        `json:"targetId"`
+	TargetTitle      string        `json:"targetTitle"`
+	Score            float64       `json:"score"`
+	Confidence       string        `json:"confidence"`
+	Evidence         []EvidenceDTO `json:"evidence"`
+	DefaultPlacement string        `json:"defaultPlacement"`
+}
+
+type SuggestLinksResponse struct {
+	DraftHash string              `json:"draftHash"`
+	Algorithm string              `json:"algorithm"`
+	Items     []LinkSuggestionDTO `json:"items"`
 }
 
 type GraphFilterDTO struct {
@@ -310,15 +333,24 @@ type GraphViewSettings struct {
 }
 
 type WorkspaceSettings struct {
-	DefaultType   string   `json:"defaultType"`
-	EnabledTypes  []string `json:"enabledTypes"`
-	AccessMode    string   `json:"accessMode"`
-	GitURL        string   `json:"gitUrl,omitempty"`
-	GitBaseRef    string   `json:"gitBaseRef,omitempty"`
-	GitBranch     string   `json:"gitBranch,omitempty"`
-	GitUsername   string   `json:"gitUsername,omitempty"`
-	GitToken      string   `json:"gitToken,omitempty"`
-	GitExitAction string   `json:"gitExitAction,omitempty"`
+	DefaultType    string                 `json:"defaultType"`
+	EnabledTypes   []string               `json:"enabledTypes"`
+	AccessMode     string                 `json:"accessMode"`
+	GitURL         string                 `json:"gitUrl,omitempty"`
+	GitBaseRef     string                 `json:"gitBaseRef,omitempty"`
+	GitBranch      string                 `json:"gitBranch,omitempty"`
+	GitUsername    string                 `json:"gitUsername,omitempty"`
+	GitToken       string                 `json:"gitToken,omitempty"`
+	GitExitAction  string                 `json:"gitExitAction,omitempty"`
+	SuggestedLinks SuggestedLinksSettings `json:"suggestedLinks"`
+}
+
+type SuggestedLinksSettings struct {
+	Mode           string  `json:"mode"`
+	Trigger        string  `json:"trigger"`
+	Placement      string  `json:"placement"`
+	MinScore       float64 `json:"minScore"`
+	MaxSuggestions int     `json:"maxSuggestions"`
 }
 
 type Service struct {
@@ -999,6 +1031,88 @@ func (s *Service) Search(ctx context.Context, input SearchQueryDTO) ([]SearchRes
 		out[i] = SearchResultDTO{ID: string(result.ID), Path: string(result.Path), Title: result.Title, Score: result.Score, Fragments: result.Fragments, Favorite: result.Favorite}
 	}
 	return out, nil
+}
+
+// SuggestLinks evaluates an unsaved draft without mutating the note or its
+// projections. The caller may turn accepted results into Markdown and then use
+// the ordinary optimistic-concurrency SaveNote path.
+func (s *Service) SuggestLinks(ctx context.Context, input SuggestLinksRequest) (SuggestLinksResponse, error) {
+	ws, err := s.workspaceSnapshot()
+	if err != nil {
+		return SuggestLinksResponse{}, err
+	}
+	id, err := ws.NormalizeNoteID(input.ID)
+	if err != nil {
+		return SuggestLinksResponse{}, appErr("suggestions.invalid_id", "Invalid note id", err)
+	}
+	_, searchIndex, _, err := s.sessionSnapshot()
+	if err != nil {
+		return SuggestLinksResponse{}, err
+	}
+	corpus := s.corpusState()
+	if corpus == nil {
+		return SuggestLinksResponse{}, appErr("suggestions.unavailable", "Suggestions are not ready", nil)
+	}
+	idx := corpus.Snapshot()
+	if idx == nil {
+		return SuggestLinksResponse{}, appErr("suggestions.unavailable", "Suggestions are not ready", nil)
+	}
+	parsed, err := okf.NewCodec().Decode(id, input.Content, time.Time{})
+	if err != nil {
+		return SuggestLinksResponse{}, appErr(ErrOKFDecodeFailed, "Could not decode draft", err)
+	}
+	parsed.Links = okf.NewResolver(idx.ResolverIDs()).ResolveLinks(id, parsed.Links)
+	queryText := suggestionQueryText(parsed)
+	results, err := searchIndex.Search(ctx, domain.SearchQuery{Text: queryText, Limit: 50})
+	if err != nil {
+		return SuggestLinksResponse{}, appErr("suggestions.search_failed", "Could not find related notes", err)
+	}
+	lexical := make(map[domain.NoteID]float64, len(results))
+	for _, result := range results {
+		lexical[result.ID] = result.Score
+	}
+	suggestions := idx.SuggestLinks(parsed, lexical, graph.SuggestionConfig{Threshold: input.MinScore, Limit: input.Limit})
+	items := make([]LinkSuggestionDTO, len(suggestions))
+	for i, suggestion := range suggestions {
+		evidence := make([]EvidenceDTO, len(suggestion.Evidence))
+		for j, item := range suggestion.Evidence {
+			evidence[j] = EvidenceDTO{Kind: string(item.Kind), Detail: item.Detail, Weight: item.Weight}
+		}
+		items[i] = LinkSuggestionDTO{
+			TargetID: string(suggestion.Target), TargetTitle: suggestion.Title,
+			Score: suggestion.Score, Confidence: suggestionConfidence(suggestion.Score),
+			Evidence: evidence, DefaultPlacement: "relatedSection",
+		}
+	}
+	hash := sha256.Sum256([]byte(input.Content))
+	return SuggestLinksResponse{DraftHash: fmt.Sprintf("%x", hash[:]), Algorithm: graph.SuggestedLinksAlgorithm, Items: items}, nil
+}
+
+func suggestionQueryText(note domain.ParsedOKFNote) string {
+	parts := []string{note.Title, note.Metadata.Description}
+	for _, heading := range note.Headings {
+		parts = append(parts, heading.Text)
+	}
+	for _, tag := range note.Tags {
+		parts = append(parts, string(tag))
+	}
+	text := strings.Join(parts, " ") + " " + note.PlainText
+	runes := []rune(text)
+	if len(runes) > 4000 {
+		text = string(runes[:4000])
+	}
+	return strings.TrimSpace(text)
+}
+
+func suggestionConfidence(score float64) string {
+	switch {
+	case score >= 0.85:
+		return "high"
+	case score >= 0.65:
+		return "strong"
+	default:
+		return "possible"
+	}
 }
 
 func (s *Service) FullGraph(ctx context.Context, input GraphFilterDTO) (GraphDTO, error) {
@@ -1763,7 +1877,7 @@ func graphLayoutPath(root string) string {
 
 func defaultSettings() Settings {
 	return Settings{
-		Version: 2,
+		Version: 3,
 		Appearance: AppearanceSettings{
 			Theme: "dark",
 		},
@@ -1788,7 +1902,11 @@ func normalizeSettings(settings Settings) Settings {
 	if settings.Version < defaults.Version {
 		settings.Version = defaults.Version
 	}
-	if settings.Appearance.Theme != "light" && settings.Appearance.Theme != "dark" {
+	// Theme IDs are owned by the frontend catalog (for example
+	// "vscode-tokyo-night"), so the application layer must preserve any
+	// non-empty ID rather than narrowing the setting to the two built-ins.
+	settings.Appearance.Theme = strings.TrimSpace(settings.Appearance.Theme)
+	if settings.Appearance.Theme == "" {
 		settings.Appearance.Theme = defaults.Appearance.Theme
 	}
 	if settings.NoteView.DefaultEditMode != "source" && settings.NoteView.DefaultEditMode != "rich" {
@@ -1868,6 +1986,29 @@ func normalizeWorkspaceSettings(settings WorkspaceSettings) WorkspaceSettings {
 		settings.GitToken = ""
 		settings.GitExitAction = ""
 	}
+	settings.SuggestedLinks = normalizeSuggestedLinksSettings(settings.SuggestedLinks)
+	return settings
+}
+
+func normalizeSuggestedLinksSettings(settings SuggestedLinksSettings) SuggestedLinksSettings {
+	if settings.Mode != "off" && settings.Mode != "prompt" && settings.Mode != "automatic" {
+		settings.Mode = "off"
+	}
+	if settings.Trigger != "whileEditing" && settings.Trigger != "onSave" {
+		settings.Trigger = "onSave"
+	}
+	if settings.Placement != "relatedSection" && settings.Placement != "preferInline" {
+		settings.Placement = "relatedSection"
+	}
+	if settings.MinScore < 0.30 || settings.MinScore > 0.95 {
+		settings.MinScore = 0.45
+	}
+	if settings.MaxSuggestions < 1 {
+		settings.MaxSuggestions = 5
+	}
+	if settings.MaxSuggestions > 10 {
+		settings.MaxSuggestions = 10
+	}
 	return settings
 }
 
@@ -1888,7 +2029,8 @@ func defaultWorkspaceSettings() WorkspaceSettings {
 			"progress",
 			"meeting",
 		},
-		AccessMode: "editable",
+		AccessMode:     "editable",
+		SuggestedLinks: normalizeSuggestedLinksSettings(SuggestedLinksSettings{}),
 	}
 }
 

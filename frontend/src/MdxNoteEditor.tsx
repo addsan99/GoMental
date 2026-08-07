@@ -239,7 +239,7 @@ function MetadataFields({frontmatter, onChange}: {frontmatter: string; onChange:
         return serializeMetadataLine(line);
       }
       if (line.kind === 'field') {
-        return `${line.key}: ${value}`;
+        return serializeMetadataLine({...line, value});
       }
       return value;
     }).join('\n');
@@ -272,14 +272,80 @@ function MetadataFields({frontmatter, onChange}: {frontmatter: string; onChange:
 }
 
 function parseMetadataLines(frontmatter: string): MetadataLine[] {
-  return frontmatter.split('\n').map((line) => {
+  const physicalLines = frontmatter.split('\n');
+  const lines: MetadataLine[] = [];
+  for (let index = 0; index < physicalLines.length; index += 1) {
+    const line = physicalLines[index];
     const match = /^([A-Za-z0-9_-]+):\s*(.*)$/.exec(line);
-    return match ? {kind: 'field', key: match[1], value: match[2]} : {kind: 'raw', text: line};
-  });
+    if (!match) {
+      lines.push({kind: 'raw', text: line});
+      continue;
+    }
+
+    const key = match[1];
+    if (key.toLocaleLowerCase() !== 'tags') {
+      lines.push({kind: 'field', key, value: match[2]});
+      continue;
+    }
+
+    const tags = parseInlineTags(match[2]);
+    while (index + 1 < physicalLines.length) {
+      const item = /^\s+-\s+(.*?)\s*$/.exec(physicalLines[index + 1]);
+      if (!item) {
+        break;
+      }
+      tags.push(unquoteYAMLScalar(item[1]));
+      index += 1;
+    }
+    lines.push({kind: 'field', key, value: tags.filter(Boolean).join(', ')});
+  }
+  return lines;
 }
 
 function serializeMetadataLine(line: MetadataLine): string {
-  return line.kind === 'field' ? `${line.key}: ${line.value}` : line.text;
+  if (line.kind !== 'field') {
+    return line.text;
+  }
+  // The backend accepts a comma-delimited scalar as well as a YAML sequence.
+  // Quoting keeps the YAML valid while the user is midway through typing a
+  // comma, colon, hash, or other YAML-significant character.
+  if (line.key.toLocaleLowerCase() === 'tags') {
+    return `${line.key}: ${JSON.stringify(line.value)}`;
+  }
+  return `${line.key}: ${line.value}`;
+}
+
+function parseInlineTags(value: string): string[] {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return [];
+  }
+  if (trimmed.startsWith('[') && trimmed.endsWith(']')) {
+    try {
+      const parsed = JSON.parse(trimmed);
+      if (Array.isArray(parsed)) {
+        return parsed.map((item) => String(item).trim()).filter(Boolean);
+      }
+    } catch {
+      return trimmed.slice(1, -1).split(',').map(unquoteYAMLScalar).filter(Boolean);
+    }
+  }
+  return [unquoteYAMLScalar(trimmed)];
+}
+
+function unquoteYAMLScalar(value: string): string {
+  const trimmed = value.trim();
+  if (trimmed.startsWith('"') && trimmed.endsWith('"')) {
+    try {
+      return String(JSON.parse(trimmed));
+    } catch {
+      // Keep malformed/incomplete input editable rather than discarding it.
+    }
+  }
+  if (trimmed.startsWith("'") && trimmed.endsWith("'")) {
+    return trimmed.slice(1, -1).replaceAll("''", "'");
+  }
+  return trimmed;
 }
 
 function splitOKFDocument(content: string): {frontmatter: string; body: string} {

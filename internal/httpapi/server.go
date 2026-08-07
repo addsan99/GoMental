@@ -156,6 +156,7 @@ func (s *Server) buildHandler() http.Handler {
 	mux.HandleFunc("POST /api/assets/{id...}", s.gate(auth.RoleEditor, s.contentWrite(s.handleSaveAsset)))
 	mux.HandleFunc("GET /api/assets/{id...}", s.gate(auth.RoleViewer, s.handleLoadAsset))
 	mux.HandleFunc("POST /api/search", s.gate(auth.RoleViewer, s.handleSearch))
+	mux.HandleFunc("POST /api/link-suggestions", s.gate(auth.RoleViewer, s.handleSuggestLinks))
 	mux.HandleFunc("POST /api/graph", s.gate(auth.RoleViewer, s.handleGraph))
 	mux.HandleFunc("POST /api/graph/query", s.gate(auth.RoleViewer, s.handleGraphQuery))
 	mux.HandleFunc("GET /api/backlinks/{id...}", s.gate(auth.RoleViewer, s.handleBacklinks))

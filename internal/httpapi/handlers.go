@@ -264,6 +264,20 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, results)
 }
 
+// POST /api/link-suggestions
+func (s *Server) handleSuggestLinks(w http.ResponseWriter, r *http.Request) {
+	var req application.SuggestLinksRequest
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+	result, err := s.service().SuggestLinks(r.Context(), req)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, result)
+}
+
 // POST /api/graph
 func (s *Server) handleGraph(w http.ResponseWriter, r *http.Request) {
 	var req application.GraphFilterDTO

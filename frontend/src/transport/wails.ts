@@ -25,7 +25,7 @@ import {
   SelectWorkspaceDirectory,
 } from '../../wailsjs/go/main/App'
 import {EventsOn} from '../../wailsjs/runtime/runtime'
-import type {GitPRResult, GitSyncResult, GoMentalSettings, MoveNoteRequest, NoteDTOWithVersion, NoteType, SaveNoteRequestWithVersion, SetNoteFavoriteRequest} from './types'
+import type {GitPRResult, GitSyncResult, GoMentalSettings, MoveNoteRequest, NoteDTOWithVersion, NoteType, SaveNoteRequestWithVersion, SetNoteFavoriteRequest, SuggestLinksRequest, SuggestLinksResponse} from './types'
 
 export {
   Backlinks,
@@ -82,6 +82,14 @@ export function GitSync(): Promise<GitSyncResult> {
     return Promise.reject(new Error('git sync is not available (not in viewer git mode)'))
   }
   return app.GitSync()
+}
+
+export function SuggestLinks(req: SuggestLinksRequest): Promise<SuggestLinksResponse> {
+  const app = (window as any)?.go?.main?.App
+  if (!app || typeof app.SuggestLinks !== 'function') {
+    return Promise.reject(new Error('suggested links are not available in this build'))
+  }
+  return app.SuggestLinks(req)
 }
 
 export function GitOpenPullRequest(): Promise<GitPRResult> {
