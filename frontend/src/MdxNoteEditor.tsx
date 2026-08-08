@@ -8,6 +8,7 @@ import {
   codeMirrorPlugin,
   headingsPlugin,
   imagePlugin,
+  InsertTable,
   linkPlugin,
   listsPlugin,
   markdownShortcutPlugin,
@@ -145,6 +146,7 @@ const MdxNoteEditor = forwardRef<MdxNoteEditorHandle, MdxNoteEditorProps>(functi
           <ButtonWithTooltip title="Insert image" onClick={() => imageInputRef.current?.click()}>
             <ImageIcon size={18} />
           </ButtonWithTooltip>
+          <InsertTable />
         </>
       ),
     }),
