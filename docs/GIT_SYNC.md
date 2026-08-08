@@ -100,6 +100,15 @@ The untracked metadata dir protected during `git clean` is `.workspace`
 here. Relocating it out of tree so the working copy is fully disposable is a
 deferred, optional enhancement (see [Out-of-tree index](#out-of-tree-index-deferred)).
 
+### Writable desktop workspace content path
+
+For a desktop workspace configured as **Writable git branch**, the selected
+directory is the Git checkout root. GoMental reads and writes notes below the
+repository-relative **Content path** setting. A blank setting defaults to
+`.GoMental`; set it to another relative path (for example `docs/knowledge`) or
+to `.` to use the repository root. Git status, commits, and pull-request commits
+are scoped to that content path, and its `.workspace` metadata remains excluded.
+
 ## HTTP endpoints & events
 
 ### `POST /api/git/sync` — trigger a sync

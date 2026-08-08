@@ -34,6 +34,13 @@ func TestWritableEnsureCreatesInstanceBranch(t *testing.T) {
 	if st := m.Status(); st.Branch != "gomental/test-machine/wiki" || st.BaseRef != "main" {
 		t.Fatalf("status = %#v", st)
 	}
+	wantWorkspace := filepath.Join(dir, DefaultWritableContentPath)
+	if m.WorkspaceDir() != wantWorkspace {
+		t.Fatalf("WorkspaceDir = %q, want %q", m.WorkspaceDir(), wantWorkspace)
+	}
+	if info, err := os.Stat(wantWorkspace); err != nil || !info.IsDir() {
+		t.Fatalf("default content directory was not created: %v", err)
+	}
 }
 
 func TestWritableEnsureFallsBackFromMainToMaster(t *testing.T) {
@@ -42,9 +49,10 @@ func TestWritableEnsureFallsBackFromMainToMaster(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "clone")
 
 	m, err := NewWritable(WritableConfig{
-		Remote: remote,
-		Branch: "gomental/test-machine/wiki",
-		Dir:    dir,
+		Remote:      remote,
+		Branch:      "gomental/test-machine/wiki",
+		Dir:         dir,
+		ContentPath: ".",
 	})
 	if err != nil {
 		t.Fatalf("NewWritable: %v", err)
@@ -63,9 +71,10 @@ func TestWritableStatusIgnoresMetadataDir(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "clone")
 
 	m, err := NewWritable(WritableConfig{
-		Remote: remote,
-		Branch: "gomental/test-machine/wiki",
-		Dir:    dir,
+		Remote:      remote,
+		Branch:      "gomental/test-machine/wiki",
+		Dir:         dir,
+		ContentPath: ".",
 	})
 	if err != nil {
 		t.Fatalf("NewWritable: %v", err)
@@ -88,10 +97,11 @@ func TestWritableCommitAndPushStagesOnlyGivenPaths(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "clone")
 
 	m, err := NewWritable(WritableConfig{
-		Remote:  remote,
-		BaseRef: "main",
-		Branch:  "gomental/test-machine/wiki",
-		Dir:     dir,
+		Remote:      remote,
+		BaseRef:     "main",
+		Branch:      "gomental/test-machine/wiki",
+		Dir:         dir,
+		ContentPath: ".",
 	})
 	if err != nil {
 		t.Fatalf("NewWritable: %v", err)
@@ -130,9 +140,10 @@ func TestWritableCommitAllIncludesExternalNotes(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "clone")
 
 	m, err := NewWritable(WritableConfig{
-		Remote: remote,
-		Branch: "gomental/test-machine/wiki",
-		Dir:    dir,
+		Remote:      remote,
+		Branch:      "gomental/test-machine/wiki",
+		Dir:         dir,
+		ContentPath: ".",
 	})
 	if err != nil {
 		t.Fatalf("NewWritable: %v", err)
@@ -193,12 +204,13 @@ func TestWritableOpenPullRequestPushesBranchFirst(t *testing.T) {
 	})}
 
 	m, err := NewWritable(WritableConfig{
-		Remote:     remote,
-		BaseRef:    "main",
-		Branch:     "gomental/test-machine/wiki",
-		Dir:        dir,
-		Credential: Credential{Token: "test-token"},
-		HTTPClient: client,
+		Remote:      remote,
+		BaseRef:     "main",
+		Branch:      "gomental/test-machine/wiki",
+		Dir:         dir,
+		ContentPath: ".",
+		Credential:  Credential{Token: "test-token"},
+		HTTPClient:  client,
 	})
 	if err != nil {
 		t.Fatalf("NewWritable: %v", err)
@@ -219,6 +231,60 @@ func TestWritableOpenPullRequestPushesBranchFirst(t *testing.T) {
 	git(t, "", "clone", "--branch", "gomental/test-machine/wiki", remote, check)
 	if _, err := os.Stat(filepath.Join(check, "copied.md")); err != nil {
 		t.Fatalf("externally copied note should be pushed before PR: %v", err)
+	}
+}
+
+func TestWritableCustomContentPathScopesCommits(t *testing.T) {
+	requireGit(t)
+	remote := makeRemote(t)
+	dir := filepath.Join(t.TempDir(), "clone")
+
+	m, err := NewWritable(WritableConfig{
+		Remote:      remote,
+		Branch:      "gomental/test-machine/wiki",
+		Dir:         dir,
+		ContentPath: "docs/mental",
+	})
+	if err != nil {
+		t.Fatalf("NewWritable: %v", err)
+	}
+	if err := m.Ensure(context.Background()); err != nil {
+		t.Fatalf("Ensure: %v", err)
+	}
+	writeFile(t, filepath.Join(m.WorkspaceDir(), "nested.md"), "# Nested\n")
+	writeFile(t, filepath.Join(dir, "unrelated.txt"), "do not commit\n")
+	if _, err := m.CommitAndPush(context.Background(), "Add nested note", []string{"nested.md"}); err != nil {
+		t.Fatalf("CommitAndPush: %v", err)
+	}
+	writeFile(t, filepath.Join(m.WorkspaceDir(), "copied.md"), "# Copied\n")
+	writeFile(t, filepath.Join(dir, "also-unrelated.txt"), "do not commit either\n")
+	if _, err := m.CommitAll(context.Background(), "Add copied note"); err != nil {
+		t.Fatalf("CommitAll: %v", err)
+	}
+	if err := m.pushBranch(context.Background()); err != nil {
+		t.Fatalf("pushBranch: %v", err)
+	}
+
+	check := filepath.Join(t.TempDir(), "check")
+	git(t, "", "clone", "--branch", "gomental/test-machine/wiki", remote, check)
+	if _, err := os.Stat(filepath.Join(check, "docs", "mental", "nested.md")); err != nil {
+		t.Fatalf("custom-path note was not pushed: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(check, "docs", "mental", "copied.md")); err != nil {
+		t.Fatalf("commit-all note under custom path was not pushed: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(check, "unrelated.txt")); !os.IsNotExist(err) {
+		t.Fatalf("file outside content path should not be pushed, stat err=%v", err)
+	}
+	if _, err := os.Stat(filepath.Join(check, "also-unrelated.txt")); !os.IsNotExist(err) {
+		t.Fatalf("commit-all should ignore files outside content path, stat err=%v", err)
+	}
+}
+
+func TestWritableRejectsEscapingContentPath(t *testing.T) {
+	_, err := NewWritable(WritableConfig{Remote: "repo", Dir: t.TempDir(), ContentPath: "../notes"})
+	if err == nil || !strings.Contains(err.Error(), "escapes the repository") {
+		t.Fatalf("expected traversal error, got %v", err)
 	}
 }
 

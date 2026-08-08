@@ -22,6 +22,7 @@ type WritableConfig struct {
 	BaseRef     string
 	Branch      string
 	Dir         string
+	ContentPath string
 	MetadataDir string
 	Credential  Credential
 	Runner      Runner
@@ -29,6 +30,8 @@ type WritableConfig struct {
 	Now         func() time.Time
 	HTTPClient  *http.Client
 }
+
+const DefaultWritableContentPath = ".GoMental"
 
 type WritableStatus struct {
 	Remote       string     `json:"remote"`
@@ -79,6 +82,11 @@ func NewWritable(cfg WritableConfig) (*WritableManager, error) {
 	if cfg.MetadataDir == "" {
 		cfg.MetadataDir = ".workspace"
 	}
+	contentPath, err := normalizeContentPath(cfg.ContentPath)
+	if err != nil {
+		return nil, err
+	}
+	cfg.ContentPath = contentPath
 	if cfg.Runner == nil {
 		cfg.Runner = execRunner{credential: cfg.Credential}
 	}
@@ -91,6 +99,25 @@ func NewWritable(cfg WritableConfig) (*WritableManager, error) {
 	m := &WritableManager{cfg: cfg}
 	m.status = WritableStatus{Remote: cfg.Remote, BaseRef: cfg.BaseRef, Branch: cfg.Branch}
 	return m, nil
+}
+
+// WorkspaceDir is the note workspace inside the Git checkout.
+func (m *WritableManager) WorkspaceDir() string {
+	dir, _ := ResolveWritableContentDir(m.cfg.Dir, m.cfg.ContentPath)
+	return dir
+}
+
+// ResolveWritableContentDir returns the note root for a repository checkout.
+func ResolveWritableContentDir(repoRoot, contentPath string) (string, error) {
+	normalized, err := normalizeContentPath(contentPath)
+	if err != nil {
+		return "", err
+	}
+	root := filepath.Clean(repoRoot)
+	if normalized == "." {
+		return root, nil
+	}
+	return filepath.Join(root, filepath.FromSlash(normalized)), nil
 }
 
 func DefaultInstanceBranch(workspaceDir string) string {
@@ -150,6 +177,9 @@ func (m *WritableManager) Ensure(ctx context.Context) error {
 	if _, err := m.cfg.Runner.Run(ctx, dir, "merge", "--no-edit", "origin/"+m.cfg.BaseRef); err != nil {
 		return m.fail(fmt.Errorf("gitsync writable: merge base failed: %w", err))
 	}
+	if err := os.MkdirAll(m.WorkspaceDir(), 0o755); err != nil {
+		return m.fail(fmt.Errorf("gitsync writable: creating content directory: %w", err))
+	}
 	m.refreshLocked(ctx)
 	return nil
 }
@@ -160,10 +190,11 @@ func (m *WritableManager) CommitAndPush(ctx context.Context, message string, pat
 	m.beginLocked("Committing local notes to git")
 	defer m.finishLocked()
 
-	paths = cleanRelPaths(paths)
+	paths = cleanRelPaths(paths, m.cfg.MetadataDir)
 	if len(paths) == 0 {
 		return CommitResult{}, nil
 	}
+	paths = m.repoPaths(paths)
 	args := append([]string{"add", "-A", "--"}, paths...)
 	if _, err := m.cfg.Runner.Run(ctx, m.cfg.Dir, args...); err != nil {
 		return CommitResult{}, m.fail(fmt.Errorf("gitsync writable: stage changes: %w", err))
@@ -206,11 +237,12 @@ func (m *WritableManager) CommitAll(ctx context.Context, message string) (Commit
 	m.beginLocked("Committing local notes to git")
 	defer m.finishLocked()
 
-	args := append([]string{"add", "-A", "--", "."}, metadataExcludePathspecs(m.cfg.MetadataDir)...)
+	root, exclusions := m.workspacePathspecs()
+	args := append([]string{"add", "-A", "--", root}, exclusions...)
 	if _, err := m.cfg.Runner.Run(ctx, m.cfg.Dir, args...); err != nil {
 		return CommitResult{}, m.fail(fmt.Errorf("gitsync writable: stage workspace changes: %w", err))
 	}
-	statusArgs := append([]string{"status", "--porcelain", "--", "."}, metadataExcludePathspecs(m.cfg.MetadataDir)...)
+	statusArgs := append([]string{"status", "--porcelain", "--", root}, exclusions...)
 	out, err := m.cfg.Runner.Run(ctx, m.cfg.Dir, statusArgs...)
 	if err != nil {
 		return CommitResult{}, m.fail(fmt.Errorf("gitsync writable: inspect workspace changes: %w", err))
@@ -320,7 +352,8 @@ func (m *WritableManager) refreshLocked(ctx context.Context) {
 	if out, err := m.cfg.Runner.Run(ctx, m.cfg.Dir, "rev-parse", "HEAD"); err == nil {
 		m.status.Commit = short(strings.TrimSpace(out))
 	}
-	statusArgs := append([]string{"status", "--porcelain", "--", "."}, metadataExcludePathspecs(m.cfg.MetadataDir)...)
+	root, exclusions := m.workspacePathspecs()
+	statusArgs := append([]string{"status", "--porcelain", "--", root}, exclusions...)
 	if out, err := m.cfg.Runner.Run(ctx, m.cfg.Dir, statusArgs...); err == nil {
 		m.status.Dirty = strings.TrimSpace(out) != ""
 	}
@@ -526,12 +559,13 @@ func sanitizeBranchPart(value string) string {
 	return out
 }
 
-func cleanRelPaths(paths []string) []string {
+func cleanRelPaths(paths []string, metadataDir string) []string {
 	out := make([]string, 0, len(paths))
 	seen := map[string]struct{}{}
+	metadataDir = filepath.ToSlash(filepath.Clean(strings.TrimSpace(metadataDir)))
 	for _, p := range paths {
 		p = filepath.ToSlash(filepath.Clean(strings.TrimSpace(p)))
-		if p == "" || p == "." || strings.HasPrefix(p, "../") || strings.HasPrefix(p, ".workspace/") || p == ".workspace" {
+		if p == "" || p == "." || filepath.IsAbs(p) || strings.HasPrefix(p, "../") || strings.HasPrefix(p, metadataDir+"/") || p == metadataDir {
 			continue
 		}
 		if _, ok := seen[p]; ok {
@@ -541,6 +575,46 @@ func cleanRelPaths(paths []string) []string {
 		out = append(out, p)
 	}
 	return out
+}
+
+func normalizeContentPath(value string) (string, error) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		value = DefaultWritableContentPath
+	}
+	value = strings.ReplaceAll(value, `\`, "/")
+	if filepath.IsAbs(filepath.FromSlash(value)) || filepath.VolumeName(filepath.FromSlash(value)) != "" {
+		return "", errors.New("gitsync writable: content path must be relative to the repository")
+	}
+	clean := filepath.ToSlash(filepath.Clean(filepath.FromSlash(value)))
+	if clean == ".." || strings.HasPrefix(clean, "../") {
+		return "", errors.New("gitsync writable: content path escapes the repository")
+	}
+	first := strings.Split(clean, "/")[0]
+	if strings.EqualFold(first, ".git") {
+		return "", errors.New("gitsync writable: content path cannot be inside .git")
+	}
+	return clean, nil
+}
+
+func (m *WritableManager) repoPaths(paths []string) []string {
+	if m.cfg.ContentPath == "." {
+		return paths
+	}
+	out := make([]string, len(paths))
+	for i, path := range paths {
+		out[i] = m.cfg.ContentPath + "/" + path
+	}
+	return out
+}
+
+func (m *WritableManager) workspacePathspecs() (string, []string) {
+	root := m.cfg.ContentPath
+	metadata := m.cfg.MetadataDir
+	if root != "." {
+		metadata = root + "/" + metadata
+	}
+	return root, metadataExcludePathspecs(metadata)
 }
 
 func metadataExcludePathspecs(metadataDir string) []string {

@@ -338,6 +338,7 @@ type WorkspaceSettings struct {
 	AccessMode     string                 `json:"accessMode"`
 	GitURL         string                 `json:"gitUrl,omitempty"`
 	GitBaseRef     string                 `json:"gitBaseRef,omitempty"`
+	GitPath        string                 `json:"gitPath,omitempty"`
 	GitBranch      string                 `json:"gitBranch,omitempty"`
 	GitUsername    string                 `json:"gitUsername,omitempty"`
 	GitToken       string                 `json:"gitToken,omitempty"`
@@ -1966,6 +1967,7 @@ func normalizeWorkspaceSettings(settings WorkspaceSettings) WorkspaceSettings {
 	if settings.GitBaseRef == "" {
 		settings.GitBaseRef = "main"
 	}
+	settings.GitPath = strings.TrimSpace(settings.GitPath)
 	settings.GitBranch = strings.TrimSpace(settings.GitBranch)
 	settings.GitUsername = strings.TrimSpace(settings.GitUsername)
 	settings.GitToken = strings.TrimSpace(settings.GitToken)
@@ -1975,12 +1977,14 @@ func normalizeWorkspaceSettings(settings WorkspaceSettings) WorkspaceSettings {
 	if settings.AccessMode != "readOnlyGit" && settings.AccessMode != "writableGit" {
 		settings.GitURL = ""
 		settings.GitBaseRef = ""
+		settings.GitPath = ""
 		settings.GitBranch = ""
 		settings.GitUsername = ""
 		settings.GitToken = ""
 		settings.GitExitAction = ""
 	}
 	if settings.AccessMode == "readOnlyGit" {
+		settings.GitPath = ""
 		settings.GitBranch = ""
 		settings.GitUsername = ""
 		settings.GitToken = ""

@@ -335,6 +335,7 @@ func (a *App) SelectWorkspaceDirectory() (string, error) {
 	return wailsruntime.OpenDirectoryDialog(a.context(), wailsruntime.OpenDialogOptions{Title: "Open OKF Workspace"})
 }
 func (a *App) OpenWorkspace(root string) (application.WorkspaceDTO, error) {
+	displayRoot := root
 	if a.viewer != nil {
 		// Materialize the clone before opening (git clone refuses a non-empty
 		// target, and the workspace open writes .workspace/ metadata). Pin to the
@@ -343,8 +344,13 @@ func (a *App) OpenWorkspace(root string) (application.WorkspaceDTO, error) {
 			return application.WorkspaceDTO{}, err
 		}
 		root = a.viewer.root
-	} else if err := a.configureWritableGit(root); err != nil {
-		return application.WorkspaceDTO{}, err
+		displayRoot = root
+	} else {
+		var err error
+		root, displayRoot, err = a.configureWritableGit(root)
+		if err != nil {
+			return application.WorkspaceDTO{}, err
+		}
 	}
 	dto, err := a.service().OpenWorkspace(a.context(), root)
 	if err != nil {
@@ -354,6 +360,9 @@ func (a *App) OpenWorkspace(root string) (application.WorkspaceDTO, error) {
 		// Start polling only after the watcher is live, so pulled changes are
 		// reconciled.
 		a.viewer.startPoll(a.context())
+	}
+	if err == nil {
+		dto.Root = displayRoot
 	}
 	return dto, err
 }
@@ -449,40 +458,41 @@ func (a *App) writesBlocked() bool {
 	return a.viewer != nil && a.viewer.readOnly
 }
 
-func (a *App) configureWritableGit(root string) error {
+func (a *App) configureWritableGit(root string) (string, string, error) {
 	a.clearWritableGit()
 	abs, err := filepath.Abs(root)
 	if err != nil {
-		return err
+		return "", "", err
 	}
 	abs = filepath.Clean(abs)
 	settings, err := a.service().LoadSettings(a.context())
 	if err != nil {
-		return err
+		return "", "", err
 	}
-	ws, ok := workspaceSettingsForPath(settings, abs)
+	sourceRoot, ws, ok := workspaceSettingsForPath(settings, abs)
 	if !ok || ws.AccessMode != "writableGit" || strings.TrimSpace(ws.GitURL) == "" {
-		return nil
+		return abs, abs, nil
 	}
 	mgr, err := gitsync.NewWritable(gitsync.WritableConfig{
-		Remote:     ws.GitURL,
-		BaseRef:    ws.GitBaseRef,
-		Branch:     ws.GitBranch,
-		Dir:        abs,
-		Credential: gitsync.Credential{Username: ws.GitUsername, Token: ws.GitToken},
-		Notify:     a.mustHost().Hub().Publish,
+		Remote:      ws.GitURL,
+		BaseRef:     ws.GitBaseRef,
+		Branch:      ws.GitBranch,
+		Dir:         sourceRoot,
+		ContentPath: ws.GitPath,
+		Credential:  gitsync.Credential{Username: ws.GitUsername, Token: ws.GitToken},
+		Notify:      a.mustHost().Hub().Publish,
 	})
 	if err != nil {
-		return err
+		return "", "", err
 	}
 	if err := mgr.Ensure(a.context()); err != nil {
-		return err
+		return "", "", err
 	}
 	a.gitMu.Lock()
 	a.gitWriter = mgr
 	a.gitExitAction = ws.GitExitAction
 	a.gitMu.Unlock()
-	return nil
+	return mgr.WorkspaceDir(), sourceRoot, nil
 }
 
 func (a *App) clearWritableGit() {
@@ -531,17 +541,32 @@ func (a *App) finalizeGitOnExit(ctx context.Context) {
 	}
 }
 
-func workspaceSettingsForPath(settings application.Settings, path string) (application.WorkspaceSettings, bool) {
+func workspaceSettingsForPath(settings application.Settings, path string) (string, application.WorkspaceSettings, bool) {
+	path = filepath.Clean(path)
 	for key, value := range settings.Workspaces {
 		abs, err := filepath.Abs(key)
 		if err == nil {
 			key = filepath.Clean(abs)
 		}
-		if strings.EqualFold(filepath.Clean(key), filepath.Clean(path)) {
-			return value, true
+		if strings.EqualFold(filepath.Clean(key), path) {
+			return key, value, true
 		}
 	}
-	return application.WorkspaceSettings{}, false
+	for key, value := range settings.Workspaces {
+		if value.AccessMode != "writableGit" {
+			continue
+		}
+		abs, err := filepath.Abs(key)
+		if err != nil {
+			continue
+		}
+		repoRoot := filepath.Clean(abs)
+		contentRoot, err := gitsync.ResolveWritableContentDir(repoRoot, value.GitPath)
+		if err == nil && strings.EqualFold(contentRoot, path) {
+			return repoRoot, value, true
+		}
+	}
+	return "", application.WorkspaceSettings{}, false
 }
 
 func notePathForID(id string) string {
@@ -584,7 +609,20 @@ func (a *App) Rebuild() (application.RebuildResultDTO, error) {
 }
 
 func (a *App) RecentWorkspaces() ([]application.RecentWorkspaceDTO, error) {
-	return a.service().RecentWorkspaces(a.context())
+	items, err := a.service().RecentWorkspaces(a.context())
+	if err != nil {
+		return nil, err
+	}
+	settings, err := a.service().LoadSettings(a.context())
+	if err != nil {
+		return nil, err
+	}
+	for i := range items {
+		if sourceRoot, ws, ok := workspaceSettingsForPath(settings, items[i].Path); ok && ws.AccessMode == "writableGit" {
+			items[i].Path = sourceRoot
+		}
+	}
+	return items, nil
 }
 
 func (a *App) LoadUIState() (application.UIState, error) {

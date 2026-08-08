@@ -454,6 +454,11 @@ func TestServiceSettingsAreAppLevel(t *testing.T) {
 			AccessMode:   "readOnlyGit",
 			GitURL:       " https://example.com/wiki.git ",
 		},
+		"C:/Writable": {
+			AccessMode: "writableGit",
+			GitURL:     " https://example.com/mono.git ",
+			GitPath:    " docs/knowledge ",
+		},
 	}
 	if err := service.SaveSettings(ctx, settings); err != nil {
 		t.Fatalf("save settings: %v", err)
@@ -471,6 +476,9 @@ func TestServiceSettingsAreAppLevel(t *testing.T) {
 	}
 	if workspaceSettings.DefaultType != "adr" || workspaceSettings.AccessMode != "readOnlyGit" || workspaceSettings.GitURL != "https://example.com/wiki.git" {
 		t.Fatalf("unexpected workspace settings: %#v", workspaceSettings)
+	}
+	if writable := loaded.Workspaces["C:/Writable"]; writable.GitPath != "docs/knowledge" {
+		t.Fatalf("expected normalized writable git path, got %#v", writable)
 	}
 	if filepath.Base(service.settingsPath) != "GoMental.Settings.json" {
 		t.Fatalf("unexpected settings path: %s", service.settingsPath)

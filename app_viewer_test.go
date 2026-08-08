@@ -134,13 +134,21 @@ func git(t *testing.T, dir string, args ...string) {
 // makeBareRemote builds a bare repo on `main` holding a single note, and returns
 // its path for cloning.
 func makeBareRemote(t *testing.T) string {
+	return makeBareRemoteAt(t, "alpha.md")
+}
+
+func makeBareRemoteAt(t *testing.T, notePath string) string {
 	t.Helper()
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git not available")
 	}
 	work := t.TempDir()
 	git(t, work, "init", "-b", "main")
-	if err := os.WriteFile(filepath.Join(work, "alpha.md"),
+	noteFile := filepath.Join(work, filepath.FromSlash(notePath))
+	if err := os.MkdirAll(filepath.Dir(noteFile), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(noteFile,
 		[]byte("---\ntype: concept\ntitle: Alpha\n---\n\n# Alpha\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -236,6 +244,7 @@ func TestWritableGitSetFavoriteUpdatesProjectionsAndPushes(t *testing.T) {
 		AccessMode: "writableGit",
 		GitURL:     bare,
 		GitBaseRef: "main",
+		GitPath:    ".",
 		GitBranch:  "gomental/test-machine/wiki",
 	}
 	if err := app.SaveSettings(settings); err != nil {
@@ -271,5 +280,63 @@ func TestWritableGitSetFavoriteUpdatesProjectionsAndPushes(t *testing.T) {
 	}
 	if !strings.Contains(strings.ReplaceAll(string(data), "\r\n", "\n"), "favorite: true") {
 		t.Fatalf("pushed alpha.md missing favorite: true:\n%s", data)
+	}
+}
+
+func TestWritableGitDefaultsToGoMentalDirectory(t *testing.T) {
+	bare := makeBareRemoteAt(t, ".GoMental/alpha.md")
+	cloneTarget := filepath.Join(t.TempDir(), "working-copy")
+	t.Setenv("APPDATA", filepath.Join(t.TempDir(), "appdata"))
+
+	app := NewApp()
+	app.ctx = context.Background()
+	t.Cleanup(func() {
+		app.mu.Lock()
+		host := app.host
+		app.mu.Unlock()
+		if host != nil {
+			_ = host.Close()
+		}
+	})
+
+	settings, err := app.LoadSettings()
+	if err != nil {
+		t.Fatalf("load settings: %v", err)
+	}
+	settings.Workspaces[cloneTarget] = application.WorkspaceSettings{
+		AccessMode: "writableGit",
+		GitURL:     bare,
+		GitBaseRef: "main",
+		GitBranch:  "gomental/test-machine/default-path",
+	}
+	if err := app.SaveSettings(settings); err != nil {
+		t.Fatalf("save settings: %v", err)
+	}
+	dto, err := app.OpenWorkspace(cloneTarget)
+	if err != nil {
+		t.Fatalf("open writable git workspace: %v", err)
+	}
+	if !strings.EqualFold(dto.Root, cloneTarget) {
+		t.Fatalf("display root = %q, want repository root %q", dto.Root, cloneTarget)
+	}
+	notes, err := app.ListNotes()
+	if err != nil || len(notes) != 1 || notes[0].ID != "alpha" {
+		t.Fatalf("notes from default content path = %#v, err=%v", notes, err)
+	}
+	if _, err := os.Stat(filepath.Join(cloneTarget, ".GoMental", ".workspace")); err != nil {
+		t.Fatalf("metadata should live under the content directory: %v", err)
+	}
+	if _, err := app.SetNoteFavorite("alpha", true); err != nil {
+		t.Fatalf("favorite alpha: %v", err)
+	}
+	recent, err := app.RecentWorkspaces()
+	if err != nil || len(recent) == 0 || !strings.EqualFold(recent[0].Path, cloneTarget) {
+		t.Fatalf("recent workspace should expose repository root: %#v, err=%v", recent, err)
+	}
+	check := filepath.Join(t.TempDir(), "check")
+	git(t, "", "clone", "--branch", "gomental/test-machine/default-path", bare, check)
+	data, err := os.ReadFile(filepath.Join(check, ".GoMental", "alpha.md"))
+	if err != nil || !strings.Contains(string(data), "favorite: true") {
+		t.Fatalf("nested note was not pushed from default path: err=%v\n%s", err, data)
 	}
 }

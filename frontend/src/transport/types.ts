@@ -102,6 +102,7 @@ export type GoMentalWorkspaceSettings = {
   accessMode: 'editable' | 'readOnlyLocal' | 'readOnlyGit' | 'writableGit'
   gitUrl: string
   gitBaseRef: string
+  gitPath: string
   gitBranch: string
   gitUsername: string
   gitToken: string

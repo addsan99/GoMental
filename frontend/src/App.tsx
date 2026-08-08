@@ -2770,6 +2770,20 @@ function SettingsModal({
                           <>
                             <label className="gm-setting-row">
                               <span>
+                                <strong>Content path</strong>
+                                <small>Path inside the repository. Leave blank for .GoMental; use . for the repository root.</small>
+                              </span>
+                              <input
+                                value={selectedWorkspaceSettings.gitPath}
+                                placeholder=".GoMental"
+                                onChange={(event) => updateSelectedWorkspaceSettings({
+                                  ...selectedWorkspaceSettings,
+                                  gitPath: event.target.value,
+                                })}
+                              />
+                            </label>
+                            <label className="gm-setting-row">
+                              <span>
                                 <strong>Instance branch</strong>
                                 <small>Leave blank to use a machine-specific GoMental branch.</small>
                               </span>
@@ -3358,6 +3372,7 @@ function defaultWorkspaceSettings(): GoMentalWorkspaceSettings {
     accessMode: 'editable',
     gitUrl: '',
     gitBaseRef: 'main',
+    gitPath: '',
     gitBranch: '',
     gitUsername: '',
     gitToken: '',
@@ -3389,6 +3404,7 @@ function normalizeWorkspaceSettings(value: GoMentalWorkspaceSettings): GoMentalW
     accessMode,
     gitUrl: accessMode === 'readOnlyGit' || accessMode === 'writableGit' ? (value?.gitUrl || '').trim() : '',
     gitBaseRef: accessMode === 'readOnlyGit' || accessMode === 'writableGit' ? (value?.gitBaseRef || 'main').trim() : '',
+    gitPath: accessMode === 'writableGit' ? (value?.gitPath || '').trim() : '',
     gitBranch: accessMode === 'writableGit' ? (value?.gitBranch || '').trim() : '',
     gitUsername: accessMode === 'writableGit' ? (value?.gitUsername || '').trim() : '',
     gitToken: accessMode === 'writableGit' ? (value?.gitToken || '').trim() : '',
