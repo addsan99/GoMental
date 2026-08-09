@@ -7,6 +7,7 @@
 /build/bin/
 /build/darwin/
 /build/windows/
+/build/android/
 
 # Frontend
 /frontend/node_modules/
@@ -23,3 +24,4 @@ aie.brains/
 .cache-go/
 .gocache/
 .tmp-go/
+github_mynotes_repo_PAT.txt

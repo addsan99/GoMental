@@ -2066,7 +2066,7 @@ function App() {
           ) : selectedNoteReady && selectedNote ? (
             <div className="gm-article-scroll scroll" ref={articleScrollRef}>
               {settings.noteView.showFindBar && <FindBar containerRef={articleScrollRef} contentKey={selectedID} />}
-              <MarkdownArticle model={article} tags={selectedTags} noteID={selectedID} onNavigate={navigateToNote} theme={themeAppearance(theme)} />
+               <MarkdownArticle model={article} tags={selectedTags} noteID={selectedID} onNavigate={navigateToNote} theme={themeAppearance(theme)} loadAsset={LoadNoteAssetDataURL} />
             </div>
           ) : workspace && selectedID ? (
             <div className="gm-empty">

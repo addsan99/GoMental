@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">GoMental</string>
+    <string name="title_activity_main">GoMental</string>
+    <string name="package_name">com.gomental.app</string>
+    <string name="custom_url_scheme">com.gomental.app</string>
+</resources>

@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -282,9 +283,82 @@ func TestWritableCustomContentPathScopesCommits(t *testing.T) {
 }
 
 func TestWritableRejectsEscapingContentPath(t *testing.T) {
-	_, err := NewWritable(WritableConfig{Remote: "repo", Dir: t.TempDir(), ContentPath: "../notes"})
-	if err == nil || !strings.Contains(err.Error(), "escapes the repository") {
-		t.Fatalf("expected traversal error, got %v", err)
+	for _, contentPath := range []string{"../notes", `..\notes`} {
+		_, err := NewWritable(WritableConfig{Remote: "repo", Dir: t.TempDir(), ContentPath: contentPath})
+		if err == nil || !strings.Contains(err.Error(), "escapes the repository") {
+			t.Fatalf("expected %q to return a traversal error, got %v", contentPath, err)
+		}
+	}
+}
+
+func TestWritableSlashContentPathUsesRepositoryRoot(t *testing.T) {
+	for _, contentPath := range []string{"/", `\`} {
+		dir := t.TempDir()
+		m, err := NewWritable(WritableConfig{Remote: "repo", Dir: dir, ContentPath: contentPath})
+		if err != nil {
+			t.Fatalf("NewWritable(%q): %v", contentPath, err)
+		}
+		if m.cfg.ContentPath != "." {
+			t.Fatalf("content path = %q, want repository root", m.cfg.ContentPath)
+		}
+		if m.WorkspaceDir() != filepath.Clean(dir) {
+			t.Fatalf("workspace dir = %q, want %q", m.WorkspaceDir(), filepath.Clean(dir))
+		}
+	}
+}
+
+func TestWritableRejectsRootedChangedPaths(t *testing.T) {
+	got := cleanRelPaths([]string{
+		"alpha.md",
+		`folder\beta.md`,
+		"/outside.md",
+		`\outside.md`,
+		"C:/outside.md",
+		`C:\outside.md`,
+		"C:outside.md",
+		"//server/share/outside.md",
+		`\\server\share\outside.md`,
+		"..",
+		"../outside.md",
+		`..\outside.md`,
+	}, ".workspace")
+	want := []string{"alpha.md", "folder/beta.md"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("cleanRelPaths = %#v, want %#v", got, want)
+	}
+}
+
+func TestWritableRejectsPortableAbsoluteContentPaths(t *testing.T) {
+	for _, contentPath := range []string{
+		"/notes",
+		`\notes`,
+		"C:/notes",
+		`C:\notes`,
+		"C:notes",
+		"//server/share/notes",
+		`\\server\share\notes`,
+	} {
+		_, err := NewWritable(WritableConfig{Remote: "repo", Dir: t.TempDir(), ContentPath: contentPath})
+		if err == nil || !strings.Contains(err.Error(), "must be relative") {
+			t.Fatalf("expected %q to return an absolute-path error, got %v", contentPath, err)
+		}
+	}
+}
+
+func TestWritableNormalizesPortableRelativeContentPaths(t *testing.T) {
+	for input, want := range map[string]string{
+		"docs/mental":    "docs/mental",
+		`docs\mental`:    "docs/mental",
+		"./docs//mental": "docs/mental",
+		".":              ".",
+	} {
+		m, err := NewWritable(WritableConfig{Remote: "repo", Dir: t.TempDir(), ContentPath: input})
+		if err != nil {
+			t.Fatalf("NewWritable(%q): %v", input, err)
+		}
+		if m.cfg.ContentPath != want {
+			t.Fatalf("content path for %q = %q, want %q", input, m.cfg.ContentPath, want)
+		}
 	}
 }
 

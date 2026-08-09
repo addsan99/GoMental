@@ -7,11 +7,17 @@
     "generate-themes": "node scripts/generate-vscode-themes.mjs",
     "dev": "npm run generate-themes && vite",
     "build": "npm run generate-themes && vite build",
+    "build:mobile": "vite build --config vite.mobile.config.ts",
+    "android:add": "cap add android",
+    "android:sync": "npm run build:mobile && cap sync android",
+    "android:open": "cap open android",
     "typecheck": "tsc --noEmit",
     "lint": "tsc --noEmit",
     "preview": "vite preview"
   },
   "dependencies": {
+    "@capacitor/android": "^7.6.8",
+    "@capacitor/core": "^7.6.8",
     "@codemirror/autocomplete": "^6.20.3",
     "@codemirror/commands": "^6.10.4",
     "@codemirror/lang-markdown": "^6.5.0",
@@ -35,6 +41,8 @@
     "three-spritetext": "^1.10.0"
   },
   "devDependencies": {
+    "@capacitor/assets": "^3.0.5",
+    "@capacitor/cli": "^7.6.8",
     "@types/react": "^19.1.0",
     "@types/react-dom": "^19.1.0",
     "@types/three": "^0.185.1",
@@ -43,6 +51,7 @@
     "vite": "^7.0.0"
   },
   "allowScripts": {
-    "esbuild@0.28.1": true
+    "esbuild@0.28.1": true,
+    "sharp@0.32.6": true
   }
 }

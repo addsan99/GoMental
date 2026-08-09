@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"path"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -562,10 +563,13 @@ func sanitizeBranchPart(value string) string {
 func cleanRelPaths(paths []string, metadataDir string) []string {
 	out := make([]string, 0, len(paths))
 	seen := map[string]struct{}{}
-	metadataDir = filepath.ToSlash(filepath.Clean(strings.TrimSpace(metadataDir)))
+	metadataDir = cleanSlashPath(metadataDir)
 	for _, p := range paths {
-		p = filepath.ToSlash(filepath.Clean(strings.TrimSpace(p)))
-		if p == "" || p == "." || filepath.IsAbs(p) || strings.HasPrefix(p, "../") || strings.HasPrefix(p, metadataDir+"/") || p == metadataDir {
+		p = cleanSlashPath(p)
+		// Git pathspecs always use slash separators, independently of the host
+		// filesystem. Check POSIX roots, Windows roots/volumes, and traversal so
+		// the same input is accepted or rejected on Windows, macOS, and Android.
+		if p == "" || p == "." || p == ".." || isPortableAbsPath(p) || strings.HasPrefix(p, "../") || strings.HasPrefix(p, metadataDir+"/") || p == metadataDir {
 			continue
 		}
 		if _, ok := seen[p]; ok {
@@ -583,10 +587,16 @@ func normalizeContentPath(value string) (string, error) {
 		value = DefaultWritableContentPath
 	}
 	value = strings.ReplaceAll(value, `\`, "/")
-	if filepath.IsAbs(filepath.FromSlash(value)) || filepath.VolumeName(filepath.FromSlash(value)) != "" {
+	// Accept a single slash as a convenient repository-root alias. This also
+	// repairs settings saved by older Windows builds, where filepath.IsAbs("/")
+	// did not reject it and repoPaths later produced //note.md.
+	if value == "/" {
+		value = "."
+	}
+	if isPortableAbsPath(value) {
 		return "", errors.New("gitsync writable: content path must be relative to the repository")
 	}
-	clean := filepath.ToSlash(filepath.Clean(filepath.FromSlash(value)))
+	clean := path.Clean(value)
 	if clean == ".." || strings.HasPrefix(clean, "../") {
 		return "", errors.New("gitsync writable: content path escapes the repository")
 	}
@@ -595,6 +605,24 @@ func normalizeContentPath(value string) (string, error) {
 		return "", errors.New("gitsync writable: content path cannot be inside .git")
 	}
 	return clean, nil
+}
+
+// cleanSlashPath normalizes a Git/workspace-relative path without depending on
+// the current GOOS. Backslashes are accepted as separators so settings and note
+// paths remain portable when a workspace moves between devices.
+func cleanSlashPath(value string) string {
+	value = strings.ReplaceAll(strings.TrimSpace(value), `\`, "/")
+	return path.Clean(value)
+}
+
+// isPortableAbsPath recognizes absolute and drive-relative forms from every
+// supported flavor, not only the OS on which this binary was compiled.
+func isPortableAbsPath(value string) bool {
+	value = strings.ReplaceAll(strings.TrimSpace(value), `\`, "/")
+	if path.IsAbs(value) || filepath.IsAbs(filepath.FromSlash(value)) || filepath.VolumeName(filepath.FromSlash(value)) != "" {
+		return true
+	}
+	return len(value) >= 2 && ((value[0] >= 'A' && value[0] <= 'Z') || (value[0] >= 'a' && value[0] <= 'z')) && value[1] == ':'
 }
 
 func (m *WritableManager) repoPaths(paths []string) []string {
@@ -618,7 +646,7 @@ func (m *WritableManager) workspacePathspecs() (string, []string) {
 }
 
 func metadataExcludePathspecs(metadataDir string) []string {
-	metadataDir = filepath.ToSlash(filepath.Clean(strings.TrimSpace(metadataDir)))
+	metadataDir = cleanSlashPath(metadataDir)
 	if metadataDir == "" || metadataDir == "." {
 		metadataDir = ".workspace"
 	}

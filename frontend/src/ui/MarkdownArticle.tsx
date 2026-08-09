@@ -6,7 +6,6 @@ import {Fragment, useEffect, useState} from 'react';
 import type {ReactNode} from 'react';
 import {BulbIcon} from './icons';
 import {MermaidDiagram} from './MermaidDiagram';
-import {LoadNoteAssetDataURL} from '../transport';
 
 export type OutlineEntry = {anchor: string; text: string};
 
@@ -325,14 +324,15 @@ function renderInline(text: string, onNavigate: (id: string) => void, keyPrefix:
     } else if (match[5] != null && match[6] != null) {
       const href = match[6].trim();
       const label = match[5].trim();
-      const isExternal = /^[a-z][a-z0-9+.-]*:/i.test(href) || href.startsWith('#');
-      if (isExternal) {
+      const isSafeExternal = /^(?:https?:|mailto:)/i.test(href) || href.startsWith('//') || href.startsWith('#');
+      const hasScheme = /^[a-z][a-z0-9+.-]*:/i.test(href);
+      if (isSafeExternal) {
         out.push(
           <a key={`${keyPrefix}-l${key++}`} href={href} target="_blank" rel="noreferrer">
             {label}
           </a>,
         );
-      } else {
+      } else if (!hasScheme) {
         out.push(
           <a
             key={`${keyPrefix}-l${key++}`}
@@ -346,6 +346,8 @@ function renderInline(text: string, onNavigate: (id: string) => void, keyPrefix:
             {label}
           </a>,
         );
+      } else {
+        out.push(<Fragment key={`${keyPrefix}-l${key++}`}>{label}</Fragment>);
       }
     } else if (match[7] != null) {
       out.push(<em key={`${keyPrefix}-i${key++}`}>{match[7]}</em>);
@@ -388,7 +390,9 @@ function obsoleteInfo(frontmatter: Record<string, string>, tags: string[]): Obso
 // AssetImage resolves a note-local asset path (e.g. assets/<id>/pic.svg) to a
 // data URL via the same asset API the editor uses, then renders it. External or
 // already-inlined (http/data) srcs render directly.
-function AssetImage({noteID, src, alt}: {noteID: string; src: string; alt: string}) {
+type AssetLoader = (request: {noteId: string; path: string}) => Promise<string>;
+
+function AssetImage({noteID, src, alt, loadAsset}: {noteID: string; src: string; alt: string; loadAsset: AssetLoader}) {
   const isExternal = /^(?:[a-z][a-z0-9+.-]*:|\/\/|data:)/i.test(src);
   const [resolved, setResolved] = useState<string>(isExternal ? src : '');
   const [failed, setFailed] = useState(false);
@@ -400,7 +404,7 @@ function AssetImage({noteID, src, alt}: {noteID: string; src: string; alt: strin
     let cancelled = false;
     setResolved('');
     setFailed(false);
-    LoadNoteAssetDataURL({noteId: noteID, path: src})
+    loadAsset({noteId: noteID, path: src})
       .then((dataURL) => {
         if (!cancelled) {
           setResolved(dataURL);
@@ -414,7 +418,7 @@ function AssetImage({noteID, src, alt}: {noteID: string; src: string; alt: strin
     return () => {
       cancelled = true;
     };
-  }, [noteID, src, isExternal]);
+  }, [noteID, src, isExternal, loadAsset]);
 
   if (failed) {
     return <div className="gm-image-broken">Image not found: {src}</div>;
@@ -437,9 +441,10 @@ type MarkdownArticleProps = {
   noteID: string;
   onNavigate: (id: string) => void;
   theme?: 'light' | 'dark';
+  loadAsset: AssetLoader;
 };
 
-export function MarkdownArticle({model, tags, noteID, onNavigate, theme = 'light'}: MarkdownArticleProps) {
+export function MarkdownArticle({model, tags, noteID, onNavigate, theme = 'light', loadAsset}: MarkdownArticleProps) {
   const obsolete = obsoleteInfo(model.frontmatter, tags);
   return (
     <article className="gm-article">
@@ -483,7 +488,7 @@ export function MarkdownArticle({model, tags, noteID, onNavigate, theme = 'light
         switch (block.t) {
           case 'h2':
             return (
-              <h2 className="gm-h2" data-anchor={block.anchor} key={key}>
+              <h2 className="gm-h2" data-anchor={block.anchor} id={block.anchor} key={key}>
                 {renderInline(block.text, onNavigate, key)}
               </h2>
             );
@@ -509,7 +514,7 @@ export function MarkdownArticle({model, tags, noteID, onNavigate, theme = 'light
               </pre>
             );
           case 'image':
-            return <AssetImage key={key} noteID={noteID} src={block.src} alt={block.alt} />;
+            return <AssetImage key={key} noteID={noteID} src={block.src} alt={block.alt} loadAsset={loadAsset} />;
           case 'table':
             return (
               <div className="gm-table-card" key={key}>
