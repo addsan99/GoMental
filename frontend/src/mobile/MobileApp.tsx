@@ -1,4 +1,5 @@
 import {useDeferredValue, useEffect, useState} from 'react'
+import iconURL from '../../assets/icon.svg'
 import {MarkdownArticle, parseArticle} from '../ui/MarkdownArticle'
 import {GoMentalNative, loadAssetDataURL, type NativeNote, type NativeNoteDetail, type NativeStatus} from './native'
 
@@ -238,8 +239,10 @@ export function MobileApp() {
           </section>
           <section className="settings-card">
             <p className="settings-label">GitHub repository</p>
-            <div className="repository-summary"><strong>{remote}</strong><span>Branch: {ref}</span></div>
+            <label className="repository-field">Repository URL<input value={remote} onChange={(event) => setRemote(event.target.value)} placeholder="https://github.com/you/notes.git" inputMode="url" autoCapitalize="none" /></label>
+            <div className="repository-summary"><span>Branch: {ref}</span></div>
             <button className="credential-action" onClick={() => void editCredential()}>{hasCredential ? 'Update or clear credential' : 'Add private credential'}</button>
+            <button className="primary-action" disabled={busy || !remote.trim()} onClick={() => void syncRepository()}>{busy ? 'Changing repository...' : 'Save and sync repository'}</button>
             <p className="security-note">The token is entered in Android UI and encrypted with Android Keystore. It is never available to this WebView.</p>
           </section>
           {error && <p className="mobile-error" role="alert">{error}</p>}
@@ -249,9 +252,9 @@ export function MobileApp() {
   }
 
   return (
-    <main className="library-screen">
+      <main className="library-screen">
       <header className="library-header">
-        <div><p className="eyebrow">GoMental</p><h1>Library</h1></div>
+        <div className="library-brand"><img src={iconURL} alt="" /><div><p className="eyebrow">GoMental</p><h1>Reader</h1></div></div>
         <div className="library-actions">
           <button className="settings-button" onClick={() => setScreen('settings')} aria-label="Settings">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 8.5a3.5 3.5 0 1 0 0 7 3.5 3.5 0 0 0 0-7Z"/><path d="M19 13.5v-3l-2-.7-.5-1.2.9-1.9-2.1-2.1-1.9.9-1.2-.5-.7-2h-3l-.7 2-1.2.5-1.9-.9-2.1 2.1.9 1.9-.5 1.2-2 .7v3l2 .7.5 1.2-.9 1.9 2.1 2.1 1.9-.9 1.2.5.7 2h3l.7-2 1.2-.5 1.9.9 2.1-2.1-.9-1.9.5-1.2 2-.7Z"/></svg>

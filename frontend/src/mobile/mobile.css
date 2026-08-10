@@ -38,6 +38,8 @@ button { -webkit-tap-highlight-color: transparent; }
 .library-screen { min-height: 100dvh; padding: max(26px, env(safe-area-inset-top)) 18px max(28px, env(safe-area-inset-bottom)); }
 .library-header { display: flex; align-items: end; justify-content: space-between; max-width: 760px; margin: 0 auto 24px; }
 .library-header .eyebrow { margin-top: 0; }
+.library-brand { display: flex; align-items: center; gap: 10px; }
+.library-brand img { width: 49px; height: 49px; }
 .library-actions { display: flex; align-items: center; gap: 8px; }
 .sync-button { border: 1px solid var(--line); border-radius: 999px; padding: 9px 15px; background: var(--paper); color: var(--accent-dark); font-weight: 750; }
 .settings-button { width: 39px; height: 39px; display: grid; place-items: center; border: 1px solid var(--line); border-radius: 50%; background: var(--paper); color: var(--muted); }
@@ -80,6 +82,9 @@ button { -webkit-tap-highlight-color: transparent; }
 .settings-content > .eyebrow { margin-top: 0; }
 .settings-content h1 { margin: 0 0 25px; font: 630 42px/.98 var(--font-read); }
 .settings-card { margin-bottom: 14px; padding: 19px; border: 1px solid var(--line); border-radius: 17px; background: color-mix(in srgb, var(--paper) 88%, var(--ink) 3%); }
+.repository-field { display: grid; gap: 7px; margin-top: 13px; color: var(--muted); font-size: 11px; font-weight: 700; }
+.repository-field input { width: 100%; padding: 12px 13px; border: 1px solid var(--line); border-radius: 11px; outline: 0; background: #fffdf7; color: var(--ink); font-size: 13px; }
+.repository-field input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px #b94a2f18; }
 .theme-toggle { display: grid; grid-template-columns: 1fr 1fr; gap: 5px; padding: 4px; border-radius: 12px; background: #0000000a; }
 .theme-toggle button { padding: 10px; border: 0; border-radius: 9px; background: transparent; color: var(--muted); font-weight: 750; }
 .theme-toggle button.active { background: var(--paper); color: var(--accent-dark); box-shadow: 0 2px 10px #00000012; }
@@ -120,7 +125,8 @@ html[data-theme='dark'] {
 html[data-theme='dark'] body { background: radial-gradient(circle at 80% -10%, #55361f55 0, transparent 35%), #171815; }
 html[data-theme='dark'] .setup-card,
 html[data-theme='dark'] .search-wrap,
-html[data-theme='dark'] .setup-card input { background: #20211dea; border-color: var(--line); color: var(--ink); }
+html[data-theme='dark'] .setup-card input,
+html[data-theme='dark'] .repository-field input { background: #20211dea; border-color: var(--line); color: var(--ink); }
 html[data-theme='dark'] .note-toolbar { background: #20211de8; }
 html[data-theme='dark'] .icon-button,
 html[data-theme='dark'] .gm-inline-code { background: #34352f; }

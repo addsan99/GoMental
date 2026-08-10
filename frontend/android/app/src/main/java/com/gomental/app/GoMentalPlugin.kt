@@ -17,6 +17,7 @@ import org.json.JSONObject
 import java.io.File
 import java.net.URI
 import java.net.URLConnection
+import java.security.MessageDigest
 import java.util.concurrent.Executors
 
 @CapacitorPlugin(name = "GoMentalNative")
@@ -39,13 +40,28 @@ class GoMentalPlugin : Plugin() {
             call.reject("Repository URL must be HTTPS and must not contain credentials")
             return
         }
-        val previousRemote = preferences.getString("remote", "")
-        if (!previousRemote.isNullOrBlank() && previousRemote != remote) credentials.clear()
-        preferences.edit().putString("remote", remote).putString("ref", ref).apply()
-        val result = JSObject()
-        result.put("remote", remote)
-        result.put("ref", ref)
-        call.resolve(result)
+        coreExecutor.execute {
+            try {
+                val previousRemote = preferences.getString("remote", "").orEmpty()
+                val legacyRemote = preferences.getString("legacyRemote", null) ?: previousRemote.ifBlank { remote }
+                val previousStorageKey = preferences.getString("storageKey", "legacy") ?: "legacy"
+                val storageKey = if (remote == legacyRemote) "legacy" else repositoryStorageKey(remote)
+                if (storageKey != previousStorageKey) closeCore()
+                if (previousRemote.isNotBlank() && previousRemote != remote) credentials.clear()
+                preferences.edit()
+                    .putString("remote", remote)
+                    .putString("ref", ref)
+                    .putString("legacyRemote", legacyRemote)
+                    .putString("storageKey", storageKey)
+                    .apply()
+                val result = JSObject()
+                result.put("remote", remote)
+                result.put("ref", ref)
+                call.resolve(result)
+            } catch (error: Exception) {
+                call.reject(error.message ?: "Could not configure repository", error)
+            }
+        }
     }
 
     @PluginMethod
@@ -200,8 +216,10 @@ class GoMentalPlugin : Plugin() {
 
     private fun ensureCore(): Core = synchronized(coreLock) {
         core ?: run {
-            val repository = File(context.filesDir, "repository")
-            val data = File(context.filesDir, "derived-data")
+            val storageKey = preferences.getString("storageKey", "legacy") ?: "legacy"
+            val storageRoot = if (storageKey == "legacy") context.filesDir else File(context.filesDir, "repositories/$storageKey")
+            val repository = File(storageRoot, "repository")
+            val data = File(storageRoot, "derived-data")
             val config = JSONObject()
                 .put("repositoryPath", repository.absolutePath)
                 .put("dataPath", data.absolutePath)
@@ -213,6 +231,10 @@ class GoMentalPlugin : Plugin() {
         core?.close()
         core = null
     }
+
+    private fun repositoryStorageKey(remote: String): String = MessageDigest.getInstance("SHA-256")
+        .digest(remote.toByteArray(Charsets.UTF_8))
+        .joinToString("") { "%02x".format(it) }
 
     private fun resolveJSON(call: PluginCall, json: String) {
         call.resolve(JSObject(json))
