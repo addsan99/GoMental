@@ -12,9 +12,11 @@ import (
 	"testing"
 	"time"
 
+	"GoMental/internal/apphost"
 	"GoMental/internal/application"
 	"GoMental/internal/gitsync"
 	"GoMental/internal/serverconfig"
+	"GoMental/internal/workspace"
 )
 
 func testLogger() *log.Logger { return log.New(io.Discard, "", 0) }
@@ -175,6 +177,18 @@ func TestViewerEndToEndClone(t *testing.T) {
 	}
 
 	app := NewViewerApp(cfg, testLogger())
+	// Keep this integration test independent of the machine's real user config
+	// directory. That directory may be sandboxed in CI and differs on macOS.
+	store := workspace.NewRecentWorkspaceStore(filepath.Join(t.TempDir(), "recent.json"), 10)
+	host, err := apphost.NewHost(apphost.Config{
+		Environment: apphost.Desktop(),
+		RecentStore: store,
+		StatePath:   filepath.Join(t.TempDir(), "ui-state.json"),
+	})
+	if err != nil {
+		t.Fatalf("create host: %v", err)
+	}
+	app.host = host
 	t.Cleanup(func() {
 		app.mu.Lock()
 		host := app.host
@@ -187,7 +201,6 @@ func TestViewerEndToEndClone(t *testing.T) {
 	// Replicate startup()'s manager build (without launching Wails): a Desktop
 	// host works headless, differing only by NativeDialogs.
 	app.ctx = context.Background()
-	host := app.mustHost()
 	mgr, err := gitsync.New(gitsync.Config{Remote: cfg.GitRemote, Ref: cfg.GitRef, Dir: cfg.WorkspaceRoot, Notify: host.Hub().Publish})
 	if err != nil {
 		t.Fatalf("new manager: %v", err)

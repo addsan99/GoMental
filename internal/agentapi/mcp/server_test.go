@@ -15,6 +15,7 @@ import (
 func testService(t *testing.T) *apphost.Host {
 	t.Helper()
 	root := t.TempDir()
+	writeNote(t, root, ".gomental/types/procedure.yaml", "id: procedure\nlabel: Procedure\ndescription: A custom procedure.\ntemplate: |\n  ---\n  type: procedure\n  title: {{titleYaml}}\n  ---\n\n  # {{title}}\n")
 	writeNote(t, root, "alpha.md", "---\ntype: concept\ntitle: Alpha\ntags: [go]\n---\n\n# Alpha\nSee [Beta](beta.md).\n")
 	writeNote(t, root, "beta.md", "---\ntype: concept\ntitle: Beta\ntags: [go]\n---\n\n# Beta\n")
 	store := workspace.NewRecentWorkspaceStore(filepath.Join(t.TempDir(), "recent.json"), 10)

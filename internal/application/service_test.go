@@ -144,7 +144,8 @@ func TestServiceWorkspaceNotesSearchGraphAndRebuild(t *testing.T) {
 func TestServiceListNotesCarriesTypeAndFilters(t *testing.T) {
 	root := t.TempDir()
 	// Two different type values prove filtering is taxonomy-agnostic (no hardcoded types).
-	writeNote(t, root, "alpha.md", "---\ntype: concept\ntitle: Alpha\ntags: [go]\n---\n\n# Alpha\n")
+	writeNote(t, root, ".gomental/types/procedure.yaml", "id: procedure\nlabel: Procedure\ndescription: A custom procedure.\ntemplate: |\n  ---\n  type: procedure\n  title: {{titleYaml}}\n  ---\n\n  # {{title}}\n")
+	writeNote(t, root, "alpha.md", "---\ntype: term\ntitle: Alpha\ntags: [go]\n---\n\n# Alpha\n")
 	writeNote(t, root, "beta.md", "---\ntype: procedure\ntitle: Beta\ntags: [go]\n---\n\n# Beta\n")
 	service := testService(t, func(string, any) {})
 	ctx := context.Background()
@@ -164,7 +165,7 @@ func TestServiceListNotesCarriesTypeAndFilters(t *testing.T) {
 	for _, n := range notes {
 		types[n.ID] = n.Type
 	}
-	if types["alpha"] != "concept" || types["beta"] != "procedure" {
+	if types["alpha"] != "term" || types["beta"] != "procedure" {
 		t.Fatalf("expected types populated, got %#v", types)
 	}
 

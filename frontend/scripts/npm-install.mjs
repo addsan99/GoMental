@@ -12,15 +12,16 @@ const candidates = [
   join(nodeDir, '..', 'lib', 'node_modules', 'npm', 'bin', 'npm-cli.js'),
 ];
 const npmCli = candidates.find(existsSync);
+const npmCommand = existsSync(join(process.cwd(), 'package-lock.json')) ? 'ci' : 'install';
 
 const result = npmCli
-  ? spawnSync(process.execPath, [npmCli, 'install'], {
+  ? spawnSync(process.execPath, [npmCli, npmCommand], {
       cwd: process.cwd(),
       env: process.env,
       stdio: 'inherit',
       windowsHide: true,
     })
-  : spawnSync('npm', ['install'], {
+  : spawnSync('npm', [npmCommand], {
       cwd: process.cwd(),
       env: process.env,
       stdio: 'inherit',

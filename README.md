@@ -20,11 +20,34 @@ wails dev
 go test ./...
 ```
 
-### macOS / Linux
+### macOS
+
+Install Xcode Command Line Tools, Go 1.25 or newer, Node.js/npm, and Wails CLI
+v2.13.0. Then run the checked macOS release build:
+
+```sh
+xcode-select --install # only when the tools are not installed yet
+go install github.com/wailsapp/wails/v2/cmd/wails@v2.13.0
+sh ./build-macos.sh
+```
+
+The script installs the exact frontend lockfile, runs TypeScript and Go tests,
+runs `wails doctor`, and builds `build/bin/GoMental.app` for Apple Silicon and
+Intel by default. To build only for the current Apple Silicon target, use:
+
+```sh
+GOMENTAL_MAC_PLATFORM=darwin/arm64 sh ./build-macos.sh
+```
+
+The resulting app is unsigned. Code signing and notarization require the
+Apple Developer identity and credentials on the Mac and are intentionally not
+performed by this repository script.
+
+### Linux
 
 ```sh
 cd frontend
-npm install
+npm ci
 cd ..
 
 wails dev
