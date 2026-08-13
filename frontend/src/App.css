@@ -701,6 +701,41 @@ body.gm-resizing * { cursor: col-resize !important; }
 .gm-article-scroll { flex: 1; overflow-y: auto; min-height: 0; }
 .gm-article { max-width: 1000px; margin: 0 auto; padding: 36px 48px 120px; animation: gm-fade .25s ease; }
 
+/* The context menu is scoped to the note pane, keeping graph and shell-native
+   right-click behavior untouched. CSS zoom scales text, diagrams, and images
+   together in both WebView2 and WKWebView. */
+.gm-note-context-surface { position: relative; flex: 1; min-width: 0; min-height: 0; display: flex; }
+.gm-note-scale { min-width: 0; }
+.gm-note-context-menu {
+  position: fixed; z-index: 100;
+  width: 232px; padding: 5px;
+  background: var(--surface); color: var(--text);
+  border: 1px solid var(--border-strong);
+  box-shadow: var(--shadow-md);
+  font: 400 13px/1.2 var(--font-ui);
+}
+.gm-note-context-menu--mac {
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--surface) 92%, transparent);
+  backdrop-filter: blur(16px) saturate(1.15);
+}
+.gm-note-context-menu--windows { border-radius: 2px; }
+.gm-note-context-item {
+  width: 100%; min-height: 28px; padding: 5px 8px;
+  display: flex; align-items: center; justify-content: space-between; gap: 20px;
+  border: none; border-radius: 4px; background: transparent; color: var(--text);
+  cursor: default; text-align: left; font: inherit;
+}
+.gm-note-context-item:hover:not(:disabled),
+.gm-note-context-item:focus-visible:not(:disabled) {
+  background: var(--accent); color: var(--accent-on); outline: none;
+}
+.gm-note-context-item:disabled { color: var(--text-3); }
+.gm-note-context-shortcut { color: var(--text-3); font-size: 12px; }
+.gm-note-context-item:hover:not(:disabled) .gm-note-context-shortcut,
+.gm-note-context-item:focus-visible:not(:disabled) .gm-note-context-shortcut { color: inherit; }
+.gm-note-context-separator { height: 1px; margin: 5px 4px; background: var(--border); }
+
 /* ---- Find-in-note bar (Ctrl+F) ---- */
 /* Sticky overlay pinned to the top-right of the read view. The negative bottom
    margin keeps it from pushing the article down — it floats over the content. */

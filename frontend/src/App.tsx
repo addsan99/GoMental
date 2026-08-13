@@ -7,6 +7,7 @@ import CommandPalette from './ui/CommandPalette';
 import LinkPicker from './ui/LinkPicker';
 import SidebarNoteTree from './ui/SidebarNoteTree';
 import Toast from './ui/Toast';
+import NoteContextMenu from './ui/NoteContextMenu';
 import {MarkdownArticle, parseArticle, slugify} from './ui/MarkdownArticle';
 import type {OutlineEntry} from './ui/MarkdownArticle';
 import FindBar from './ui/FindBar';
@@ -117,6 +118,13 @@ const LARGE_GRAPH_3D_MAX = 1200;
 
 // How many recently-visited notes the back/forward history retains.
 const HISTORY_MAX = 15;
+const NOTE_ZOOM_MIN = 0.8;
+const NOTE_ZOOM_MAX = 1.5;
+const NOTE_ZOOM_STEP = 0.1;
+
+function roundNoteZoom(value: number): number {
+  return Math.round(value * 100) / 100;
+}
 
 const emptyInfo: AppInfoWithMode = {
   name: 'GoMental',
@@ -229,6 +237,7 @@ function App() {
   const [toastMsg, setToastMsg] = useState('');
   const [activeAnchor, setActiveAnchor] = useState('');
   const [graphStats, setGraphStats] = useState<{notes: number; links: number}>({notes: 0, links: 0});
+  const [noteZoom, setNoteZoom] = useState(1);
 
   // Resizable left pane (persisted) + collapsible right rail (persisted).
   const [sidebarWidth, setSidebarWidth] = useState<number>(() => readStoredSidebarWidth());
@@ -1401,6 +1410,9 @@ function App() {
 
   const resetSidebarWidth = useCallback(() => setSidebarWidth(SIDEBAR_BASE_WIDTH), []);
   const toggleRail = useCallback(() => setRailCollapsed((current) => !current), []);
+  const zoomInNote = useCallback(() => setNoteZoom((current) => Math.min(NOTE_ZOOM_MAX, roundNoteZoom(current + NOTE_ZOOM_STEP))), []);
+  const zoomOutNote = useCallback(() => setNoteZoom((current) => Math.max(NOTE_ZOOM_MIN, roundNoteZoom(current - NOTE_ZOOM_STEP))), []);
+  const resetNoteZoom = useCallback(() => setNoteZoom(1), []);
 
   useEffect(() => () => {
     if (graphReloadTimerRef.current !== null) {
@@ -1433,6 +1445,26 @@ function App() {
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [paletteOpen, linkPickerOpen, isEditing, rawMode, openLinkPicker]);
+
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (!(event.metaKey || event.ctrlKey) || activeTab !== 'note' || !selectedNote) {
+        return;
+      }
+      if (event.key === '+' || event.key === '=') {
+        event.preventDefault();
+        zoomInNote();
+      } else if (event.key === '-') {
+        event.preventDefault();
+        zoomOutNote();
+      } else if (event.key === '0') {
+        event.preventDefault();
+        resetNoteZoom();
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [activeTab, resetNoteZoom, selectedNote, zoomInNote, zoomOutNote]);
 
   const toggleTheme = useCallback(() => {
     const nextTheme = themeAppearance(theme) === 'dark' ? 'light' : 'dark';
@@ -2021,65 +2053,84 @@ function App() {
               </Suspense>
             </div>
           )}
-          {activeTab === 'graph' ? null : rawMode && selectedNoteReady && selectedNote ? (
-            <div className="gm-source-scroll scroll">
-              <div className="gm-source-wrap">
-                <div className="gm-source-card">
-                  <div className="gm-source-titlebar">
-                    <span className="gm-source-filename">{fileNameShort}.md</span>
-                  </div>
-                  <div className="gm-source-editor">
-                    <Suspense fallback={<div className="gm-empty"><h2>Loading editor…</h2></div>}>
-                      <CodeMirrorEditor
-                        ref={codeMirrorRef}
-                        value={draft}
-                        notes={notes}
-                        theme={themeAppearance(theme)}
-                        onChange={handleDraftChange}
-                        onSave={() => saveCurrentNote(true)}
-                        onNavigate={navigateToNote}
-                        onRequestLink={openLinkPicker}
-                        onSaveImage={saveImageAsset}
-                      />
-                    </Suspense>
+          {activeTab === 'graph' ? null : (
+            <NoteContextMenu
+              enabled={selectedNoteReady && Boolean(selectedNote)}
+              zoom={noteZoom}
+              canZoomIn={noteZoom < NOTE_ZOOM_MAX}
+              canZoomOut={noteZoom > NOTE_ZOOM_MIN}
+              onZoomIn={zoomInNote}
+              onZoomOut={zoomOutNote}
+              onResetZoom={resetNoteZoom}
+              onClipboardError={showToast}
+            >
+              {rawMode && selectedNoteReady && selectedNote ? (
+                <div className="gm-source-scroll scroll">
+                  <div className="gm-note-scale" style={{zoom: noteZoom}}>
+                    <div className="gm-source-wrap">
+                      <div className="gm-source-card">
+                        <div className="gm-source-titlebar">
+                          <span className="gm-source-filename">{fileNameShort}.md</span>
+                        </div>
+                        <div className="gm-source-editor">
+                          <Suspense fallback={<div className="gm-empty"><h2>Loading editor…</h2></div>}>
+                            <CodeMirrorEditor
+                              ref={codeMirrorRef}
+                              value={draft}
+                              notes={notes}
+                              theme={themeAppearance(theme)}
+                              onChange={handleDraftChange}
+                              onSave={() => saveCurrentNote(true)}
+                              onNavigate={navigateToNote}
+                              onRequestLink={openLinkPicker}
+                              onSaveImage={saveImageAsset}
+                            />
+                          </Suspense>
+                        </div>
+                      </div>
+                    </div>
                   </div>
                 </div>
-              </div>
-            </div>
-          ) : isEditing && selectedNoteReady && selectedNote ? (
-            <div className="gm-article-scroll scroll" ref={articleScrollRef}>
-              <div className="gm-article-editor-wrap">
-                <Suspense fallback={<div className="gm-empty"><h2>Loading editor…</h2></div>}>
-                  <MdxNoteEditor
-                    ref={mdxEditorRef}
-                    noteID={selectedID}
-                    content={renderContent}
-                    theme={themeAppearance(theme)}
-                    onNavigate={navigateToNote}
-                    onChange={handleDraftChange}
-                    onSaveImage={saveEditorImage}
-                    onRequestLink={openLinkPicker}
-                  />
-                </Suspense>
-              </div>
-            </div>
-          ) : selectedNoteReady && selectedNote ? (
-            <div className="gm-article-scroll scroll" ref={articleScrollRef}>
-              {settings.noteView.showFindBar && <FindBar containerRef={articleScrollRef} contentKey={selectedID} />}
-               <MarkdownArticle model={article} tags={selectedTags} noteID={selectedID} onNavigate={navigateToNote} theme={themeAppearance(theme)} loadAsset={LoadNoteAssetDataURL} />
-            </div>
-          ) : workspace && selectedID ? (
-            <div className="gm-empty">
-              <h2>Loading note</h2>
-              <p className="gm-mono">{selectedID}</p>
-            </div>
-          ) : (
-            <div className="gm-empty">
-              <h2>Open a workspace</h2>
-              <p>Select a local folder containing OKF Markdown concept documents.</p>
-              <button type="button" className="gm-btn gm-btn-primary" onClick={chooseWorkspace} disabled={interactionBusy}>Open Workspace</button>
-              <RecentWorkspaceList recent={recent} disabled={interactionBusy} onOpen={(path) => void openWorkspace(path)} variant="main" />
-            </div>
+              ) : isEditing && selectedNoteReady && selectedNote ? (
+                <div className="gm-article-scroll scroll" ref={articleScrollRef}>
+                  <div className="gm-note-scale" style={{zoom: noteZoom}}>
+                    <div className="gm-article-editor-wrap">
+                      <Suspense fallback={<div className="gm-empty"><h2>Loading editor…</h2></div>}>
+                        <MdxNoteEditor
+                          ref={mdxEditorRef}
+                          noteID={selectedID}
+                          content={renderContent}
+                          theme={themeAppearance(theme)}
+                          onNavigate={navigateToNote}
+                          onChange={handleDraftChange}
+                          onSaveImage={saveEditorImage}
+                          onRequestLink={openLinkPicker}
+                        />
+                      </Suspense>
+                    </div>
+                  </div>
+                </div>
+              ) : selectedNoteReady && selectedNote ? (
+                <div className="gm-article-scroll scroll" ref={articleScrollRef}>
+                  <div className="gm-note-scale" style={{zoom: noteZoom}}>
+                    {settings.noteView.showFindBar && <FindBar containerRef={articleScrollRef} contentKey={selectedID} />}
+                    <MarkdownArticle model={article} tags={selectedTags} noteID={selectedID} onNavigate={navigateToNote} theme={themeAppearance(theme)} loadAsset={LoadNoteAssetDataURL} />
+                  </div>
+                </div>
+              ) : workspace && selectedID ? (
+                <div className="gm-empty">
+                  <h2>Loading note</h2>
+                  <p className="gm-mono">{selectedID}</p>
+                </div>
+              ) : (
+                <div className="gm-empty">
+                  <h2>Open a workspace</h2>
+                  <p>Select a local folder containing OKF Markdown concept documents.</p>
+                  <button type="button" className="gm-btn gm-btn-primary" onClick={chooseWorkspace} disabled={interactionBusy}>Open Workspace</button>
+                  <RecentWorkspaceList recent={recent} disabled={interactionBusy} onOpen={(path) => void openWorkspace(path)} variant="main" />
+                </div>
+              )}
+            </NoteContextMenu>
           )}
         </main>
 
@@ -3528,4 +3579,3 @@ function isConflictError(err: unknown): boolean {
 
 
 export default App;
-
