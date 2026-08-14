@@ -84,6 +84,8 @@ export type GoMentalSettings = {
   version: number
   appearance: {
     theme: string
+    readingFont: 'newsreader' | 'georgia' | 'system-serif' | 'system-sans' | 'open-sans' | 'calibri' | 'roboto'
+    defaultZoom: number
   }
   noteView: {
     defaultEditMode: 'rich' | 'source'

@@ -89,6 +89,30 @@ function prefetchEditors() {
   void import('./CodeMirrorEditor');
 }
 
+function isReadingFont(value: unknown): value is GoMentalSettings['appearance']['readingFont'] {
+  return value === 'newsreader' || value === 'open-sans' || value === 'calibri' || value === 'roboto' || value === 'georgia' || value === 'system-serif' || value === 'system-sans';
+}
+
+function readingFontFamily(font: GoMentalSettings['appearance']['readingFont']): string {
+  switch (font) {
+    case 'open-sans':
+      return '"Open Sans Variable", "Open Sans", Arial, sans-serif';
+    case 'calibri':
+      return 'Calibri, "Segoe UI", Arial, sans-serif';
+    case 'roboto':
+      return '"Roboto Variable", Roboto, Arial, sans-serif';
+    case 'georgia':
+      return 'Georgia, "Times New Roman", serif';
+    case 'system-serif':
+      return 'ui-serif, Georgia, "Times New Roman", serif';
+    case 'system-sans':
+      return 'system-ui, -apple-system, "Segoe UI", sans-serif';
+    case 'newsreader':
+    default:
+      return '"Newsreader Variable", Georgia, "Times New Roman", serif';
+  }
+}
+
 type TreeGroup = {
   name: string;
   depth: number;
@@ -118,13 +142,9 @@ const LARGE_GRAPH_3D_MAX = 1200;
 
 // How many recently-visited notes the back/forward history retains.
 const HISTORY_MAX = 15;
-const NOTE_ZOOM_MIN = 0.8;
-const NOTE_ZOOM_MAX = 1.5;
+const NOTE_ZOOM_MIN = 0.75;
+const NOTE_ZOOM_MAX = 2;
 const NOTE_ZOOM_STEP = 0.1;
-
-function roundNoteZoom(value: number): number {
-  return Math.round(value * 100) / 100;
-}
 
 const emptyInfo: AppInfoWithMode = {
   name: 'GoMental',
@@ -136,6 +156,8 @@ const DEFAULT_SETTINGS: GoMentalSettings = {
   version: 3,
   appearance: {
     theme: 'dark',
+    readingFont: 'newsreader',
+    defaultZoom: 1,
   },
   noteView: {
     defaultEditMode: 'rich',
@@ -269,10 +291,48 @@ function App() {
     toastTimerRef.current = setTimeout(() => setToastMsg(''), 1900);
   }, []);
 
+  const zoomInNote = useCallback(() => {
+    setNoteZoom((current) => Math.min(NOTE_ZOOM_MAX, Math.round((current + NOTE_ZOOM_STEP) * 100) / 100));
+  }, []);
+  const zoomOutNote = useCallback(() => {
+    setNoteZoom((current) => Math.max(NOTE_ZOOM_MIN, Math.round((current - NOTE_ZOOM_STEP) * 100) / 100));
+  }, []);
+  const resetNoteZoom = useCallback(() => setNoteZoom(settings.appearance.defaultZoom), [settings.appearance.defaultZoom]);
+
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (
+        activeTab !== 'note' ||
+        !selectedNote ||
+        !(event.metaKey || event.ctrlKey) ||
+        event.altKey
+      ) {
+        return;
+      }
+      const target = event.target;
+      if (target instanceof HTMLElement && target.closest('input, textarea, [contenteditable="true"]')) {
+        return;
+      }
+      if (event.key === '+' || event.key === '=') {
+        event.preventDefault();
+        zoomInNote();
+      } else if (event.key === '-' || event.key === '_') {
+        event.preventDefault();
+        zoomOutNote();
+      } else if (event.key === '0') {
+        event.preventDefault();
+        resetNoteZoom();
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [activeTab, resetNoteZoom, selectedNote, zoomInNote, zoomOutNote]);
+
   const applySettingsToUI = useCallback((next: GoMentalSettings) => {
     const normalized = normalizeSettings(next);
     setSettings(normalized);
     setTheme(normalized.appearance.theme);
+    setNoteZoom(normalized.appearance.defaultZoom);
     setGraphMode(normalized.graphView.defaultMode);
     setGraphDepth(normalized.graphView.defaultDepth);
   }, []);
@@ -1410,9 +1470,6 @@ function App() {
 
   const resetSidebarWidth = useCallback(() => setSidebarWidth(SIDEBAR_BASE_WIDTH), []);
   const toggleRail = useCallback(() => setRailCollapsed((current) => !current), []);
-  const zoomInNote = useCallback(() => setNoteZoom((current) => Math.min(NOTE_ZOOM_MAX, roundNoteZoom(current + NOTE_ZOOM_STEP))), []);
-  const zoomOutNote = useCallback(() => setNoteZoom((current) => Math.max(NOTE_ZOOM_MIN, roundNoteZoom(current - NOTE_ZOOM_STEP))), []);
-  const resetNoteZoom = useCallback(() => setNoteZoom(1), []);
 
   useEffect(() => () => {
     if (graphReloadTimerRef.current !== null) {
@@ -1527,7 +1584,11 @@ function App() {
   }, [currentWorkspaceSettings.defaultType, enabledNoteTemplateOptions, newNoteTemplate, workspace]);
 
   return (
-    <div className="gm-shell" data-theme={themeAppearance(theme)}>
+    <div
+      className="gm-shell"
+      data-theme={themeAppearance(theme)}
+      style={{'--font-read': readingFontFamily(settings.appearance.readingFont)} as CSSProperties}
+    >
       {/* ============================ HEADER ============================ */}
       <header className="gm-header">
         <div className="gm-brand">
@@ -1979,10 +2040,17 @@ function App() {
                 </div>
               )}
               {selectedNote && activeTab === 'note' && (
-                <div className="gm-meta">
-                  <span className="gm-meta-item"><ClockIcon size={13} />Edited {modified || 'recently'}</span>
-                  <span>{wordCount} words · {readTime} min read</span>
-                </div>
+                <>
+                  <div className="gm-note-zoom" role="group" aria-label="Note zoom">
+                    <button type="button" onClick={zoomOutNote} disabled={noteZoom <= NOTE_ZOOM_MIN} title="Zoom out (⌘−)" aria-label="Zoom out">−</button>
+                    <button type="button" onClick={resetNoteZoom} disabled={noteZoom === settings.appearance.defaultZoom} title="Reset to default zoom (⌘0)">{Math.round(noteZoom * 100)}%</button>
+                    <button type="button" onClick={zoomInNote} disabled={noteZoom >= NOTE_ZOOM_MAX} title="Zoom in (⌘+)" aria-label="Zoom in">+</button>
+                  </div>
+                  <div className="gm-meta">
+                    <span className="gm-meta-item"><ClockIcon size={13} />Edited {modified || 'recently'}</span>
+                    <span>{wordCount} words · {readTime} min read</span>
+                  </div>
+                </>
               )}
             </div>
           </div>
@@ -2585,6 +2653,49 @@ function SettingsModal({
                     <option value="dark">Dark</option>
                     <option value="light">Light</option>
                     {vscodeThemeOptions.map((theme) => <option key={theme.id} value={theme.id}>{theme.label} ({theme.category})</option>)}
+                  </select>
+                </label>
+                <label className="gm-setting-row">
+                  <span>
+                    <strong>Reading font</strong>
+                    <small>Used when reading notes.</small>
+                  </span>
+                  <select
+                    value={settings.appearance.readingFont}
+                    onChange={(event) => onChange({
+                      ...settings,
+                      appearance: {
+                        ...settings.appearance,
+                        readingFont: event.target.value as GoMentalSettings['appearance']['readingFont'],
+                      },
+                    })}
+                  >
+                    <option value="newsreader">Newsreader</option>
+                    <option value="open-sans">Open Sans</option>
+                    <option value="calibri">Calibri</option>
+                    <option value="roboto">Roboto</option>
+                    <option value="georgia">Georgia</option>
+                    <option value="system-serif">System serif</option>
+                    <option value="system-sans">System sans-serif</option>
+                  </select>
+                </label>
+                <label className="gm-setting-row">
+                  <span>
+                    <strong>Default note zoom</strong>
+                    <small>Scales note text, images, diagrams, and editors.</small>
+                  </span>
+                  <select
+                    value={settings.appearance.defaultZoom}
+                    onChange={(event) => onChange({
+                      ...settings,
+                      appearance: {...settings.appearance, defaultZoom: Number(event.target.value)},
+                    })}
+                  >
+                    <option value={0.85}>85%</option>
+                    <option value={1}>100%</option>
+                    <option value={1.15}>115%</option>
+                    <option value={1.3}>130%</option>
+                    <option value={1.5}>150%</option>
                   </select>
                 </label>
               </SettingsGroup>
@@ -3347,6 +3458,10 @@ function normalizeSettings(value: GoMentalSettings): GoMentalSettings {
   const theme = value?.appearance?.theme === 'light' || value?.appearance?.theme === 'dark' || themeOption(value?.appearance?.theme || '')
     ? value.appearance.theme
     : DEFAULT_SETTINGS.appearance.theme;
+  const readingFont = isReadingFont(value?.appearance?.readingFont)
+    ? value.appearance.readingFont
+    : DEFAULT_SETTINGS.appearance.readingFont;
+  const defaultZoom = clamp(Number(value?.appearance?.defaultZoom) || DEFAULT_SETTINGS.appearance.defaultZoom, NOTE_ZOOM_MIN, NOTE_ZOOM_MAX);
   const defaultEditMode = value?.noteView?.defaultEditMode === 'source' || value?.noteView?.defaultEditMode === 'rich'
     ? value.noteView.defaultEditMode
     : DEFAULT_SETTINGS.noteView.defaultEditMode;
@@ -3368,7 +3483,7 @@ function normalizeSettings(value: GoMentalSettings): GoMentalSettings {
   }
   return {
     version: 3,
-    appearance: {theme},
+    appearance: {theme, readingFont, defaultZoom},
     noteView: {
       defaultEditMode,
       showFindBar: typeof value?.noteView?.showFindBar === 'boolean' ? value.noteView.showFindBar : DEFAULT_SETTINGS.noteView.showFindBar,

@@ -696,9 +696,21 @@ body.gm-resizing * { cursor: col-resize !important; }
 
 .gm-meta { display: flex; align-items: center; gap: 16px; font: 400 12px/1 var(--font-ui); color: var(--text-3); padding-bottom: 9px; }
 .gm-meta-item { display: flex; align-items: center; gap: 5px; }
+.gm-note-zoom {
+  display: inline-flex; align-items: center; overflow: hidden; margin-left: auto; margin-bottom: 6px;
+  border: 1px solid var(--border); border-radius: 7px; background: var(--surface);
+}
+.gm-note-zoom button {
+  min-width: 28px; height: 24px; padding: 0 7px; border: 0; border-right: 1px solid var(--border);
+  background: transparent; color: var(--text-2); cursor: pointer; font: 500 11px/1 var(--font-mono);
+}
+.gm-note-zoom button:last-child { border-right: 0; }
+.gm-note-zoom button:hover:not(:disabled) { background: var(--surface-2); color: var(--text); }
+.gm-note-zoom button:disabled { color: var(--text-3); cursor: default; }
 
 /* ---- Rendered article ---- */
-.gm-article-scroll { flex: 1; overflow-y: auto; min-height: 0; }
+.gm-article-scroll { flex: 1; overflow: auto; min-height: 0; }
+.gm-note-scale { width: 100%; transform-origin: top center; }
 .gm-article { max-width: 1000px; margin: 0 auto; padding: 36px 48px 120px; animation: gm-fade .25s ease; }
 
 /* The context menu is scoped to the note pane, keeping graph and shell-native
@@ -833,6 +845,13 @@ body.gm-resizing * { cursor: col-resize !important; }
   background: var(--surface-2); border: 1px solid var(--border); border-radius: 12px;
 }
 .gm-mermaid svg { max-width: 100%; height: auto; }
+[data-theme="dark"] .gm-mermaid svg text,
+[data-theme="dark"] .gm-mermaid svg .edgeLabel,
+[data-theme="dark"] .gm-mermaid svg .edgeLabel p { fill: #f8fafc !important; color: #f8fafc !important; }
+[data-theme="dark"] .gm-mermaid svg .edgeLabel rect { fill: #30343b !important; opacity: 1 !important; }
+[data-theme="dark"] .gm-mermaid svg .flowchart-link,
+[data-theme="dark"] .gm-mermaid svg .edgePath path.path { stroke: #cbd5e1 !important; }
+[data-theme="dark"] .gm-mermaid svg marker path { fill: #cbd5e1 !important; stroke: #cbd5e1 !important; }
 .gm-mermaid-error { flex-direction: column; align-items: stretch; gap: 8px; }
 .gm-mermaid-error-msg { font: 400 12.5px/1.5 var(--font-mono); color: #c0392b; }
 [data-theme="dark"] .gm-mermaid-error-msg { color: #f0a08c; }
@@ -850,13 +869,13 @@ body.gm-resizing * { cursor: col-resize !important; }
 }
 [data-theme="dark"] .gm-image-broken { color: #f0a08c; }
 
-.gm-table-card { border: 1px solid var(--border); border-radius: 12px; overflow: hidden; margin: 8px 0 24px; background: var(--surface); box-shadow: var(--shadow-sm); }
-.gm-table { width: 100%; border-collapse: collapse; }
+.gm-table-card { border: 1px solid var(--border); border-radius: 12px; overflow-x: auto; margin: 8px 0 24px; background: var(--surface); box-shadow: var(--shadow-sm); }
+.gm-table { width: max-content; min-width: 100%; border-collapse: collapse; }
 .gm-table thead tr { background: var(--surface-2); }
-.gm-th { padding: 11px 16px; text-align: left; font: 600 12px/1 var(--font-ui); letter-spacing: .03em; text-transform: uppercase; color: var(--text-3); }
+.gm-th { min-width: 10rem; padding: 11px 16px; text-align: left; font: 600 12px/1 var(--font-ui); letter-spacing: .03em; text-transform: uppercase; color: var(--text-3); }
 .gm-th-num { text-align: right; }
 .gm-table tbody tr { border-top: 1px solid var(--border); }
-.gm-td { padding: 11px 16px; text-align: left; font: 400 15px/1.5 var(--font-read); color: var(--text); }
+.gm-td { min-width: 10rem; padding: 11px 16px; text-align: left; font: 400 15px/1.5 var(--font-read); color: var(--text); }
 .gm-td-num { text-align: right; font-weight: 500; color: var(--text-2); font-variant-numeric: tabular-nums; white-space: nowrap; }
 
 .gm-steps { display: flex; flex-direction: column; gap: 14px; margin: 6px 0 24px; }
@@ -965,7 +984,7 @@ body.gm-resizing * { cursor: col-resize !important; }
 }
 
 /* ---- Source view ---- */
-.gm-source-scroll { flex: 1; overflow-y: auto; min-height: 0; background: var(--bg); }
+.gm-source-scroll { flex: 1; overflow: auto; min-height: 0; background: var(--bg); }
 .gm-source-wrap { max-width: 1000px; margin: 0 auto; padding: 28px 32px 96px; }
 .gm-source-card { border: 1px solid var(--border); border-radius: 12px; overflow: hidden; background: var(--surface); box-shadow: var(--shadow-sm); }
 .gm-source-titlebar {

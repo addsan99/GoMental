@@ -98,7 +98,7 @@ export function NoteContextMenu({
     setMenu(null);
   };
 
-  const hasSelection = menu?.selection.length > 0;
+  const hasSelection = (menu?.selection.length ?? 0) > 0;
   const canCut = Boolean(menu?.editable && hasSelection);
   const canCopy = Boolean(hasSelection);
   const canPaste = Boolean(menu?.editable);
@@ -189,6 +189,9 @@ async function performClipboardAction(action: ClipboardAction, state: ClipboardS
   }
 
   if (action === 'paste') {
+    if (!target) {
+      throw new Error('Paste target is unavailable');
+    }
     const text = await navigator.clipboard.readText();
     if (!insertText(target, text)) {
       throw new Error('Paste target rejected the clipboard text');

@@ -439,11 +439,13 @@ func TestServiceSettingsAreAppLevel(t *testing.T) {
 	if err != nil {
 		t.Fatalf("load default settings: %v", err)
 	}
-	if settings.Appearance.Theme != "dark" || settings.NoteView.DefaultEditMode != "rich" || settings.GraphView.DefaultDepth != 2 {
+	if settings.Appearance.Theme != "dark" || settings.Appearance.ReadingFont != "newsreader" || settings.Appearance.DefaultZoom != 1 || settings.NoteView.DefaultEditMode != "rich" || settings.GraphView.DefaultDepth != 2 {
 		t.Fatalf("unexpected default settings: %#v", settings)
 	}
 
 	settings.Appearance.Theme = "vscode-tokyo-night"
+	settings.Appearance.ReadingFont = "georgia"
+	settings.Appearance.DefaultZoom = 1.15
 	settings.NoteView.DefaultEditMode = "source"
 	settings.NoteView.ShowFindBar = false
 	settings.GraphView.DefaultMode = "3d"
@@ -468,7 +470,7 @@ func TestServiceSettingsAreAppLevel(t *testing.T) {
 	if err != nil {
 		t.Fatalf("load saved settings: %v", err)
 	}
-	if loaded.Appearance.Theme != "vscode-tokyo-night" || loaded.NoteView.DefaultEditMode != "source" || loaded.NoteView.ShowFindBar || loaded.GraphView.DefaultMode != "3d" || loaded.GraphView.DefaultDepth != 4 {
+	if loaded.Appearance.Theme != "vscode-tokyo-night" || loaded.Appearance.ReadingFont != "georgia" || loaded.Appearance.DefaultZoom != 1.15 || loaded.NoteView.DefaultEditMode != "source" || loaded.NoteView.ShowFindBar || loaded.GraphView.DefaultMode != "3d" || loaded.GraphView.DefaultDepth != 4 {
 		t.Fatalf("unexpected saved settings: %#v", loaded)
 	}
 	workspaceSettings, ok := loaded.Workspaces["C:/Knowledge"]
