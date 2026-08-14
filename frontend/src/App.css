@@ -95,8 +95,8 @@ select {
 
 /* ---- Shell ---- */
 .gm-shell {
-  display: grid;
-  grid-template-rows: 56px 1fr;
+  display: flex;
+  flex-direction: column;
   height: 100vh;
   min-height: 0;
   background: var(--bg);
@@ -108,6 +108,7 @@ select {
   position: relative;
   display: grid;
   grid-template-columns: var(--gm-sidebar-w, 290px) minmax(0, 1fr) 300px;
+  flex: 1 1 auto;
   min-height: 0;
 }
 .gm-body.gm-rail-collapsed {
@@ -244,6 +245,7 @@ body.gm-resizing * { cursor: col-resize !important; }
   align-items: center;
   gap: 14px;
   padding: 0 16px;
+  flex: 0 0 56px;
   background: var(--surface);
   border-bottom: 1px solid var(--border);
   z-index: 20;
@@ -341,6 +343,7 @@ body.gm-resizing * { cursor: col-resize !important; }
   align-items: center;
   gap: 8px;
   padding: 7px 16px;
+  flex: 0 0 auto;
   background: var(--accent-soft);
   border-bottom: 1px solid var(--accent-soft-line);
   color: var(--text);
