@@ -94,6 +94,7 @@ func (r Rebuilder) RebuildWorkspaceSoftLinks(ctx context.Context, root string) e
 	if err != nil {
 		return err
 	}
+	okf.SetActiveMapping(ws.Mapping())
 	repo := workspace.NewFileNoteRepository(ws)
 	r.report(RebuildProgress{Stage: ProgressScanning, Message: "Scanning OKF notes"})
 	summaries, err := repo.List(ctx)
@@ -134,6 +135,7 @@ func (r Rebuilder) RebuildCore(ctx context.Context, root string) (RebuildResult,
 	if err != nil {
 		return RebuildResult{}, nil, err
 	}
+	okf.SetActiveMapping(ws.Mapping())
 	repo := workspace.NewFileNoteRepository(ws)
 	startedAt := r.Now().UTC()
 

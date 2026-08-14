@@ -184,3 +184,75 @@ func hasStage(progress []RebuildProgress, stage ProgressStage) bool {
 	}
 	return false
 }
+
+// A workspace's ingest profile must reach the parser through the rebuild path
+// too. Rebuild opens the workspace itself, so it cannot rely on the application
+// service having installed the profile first: forgetting that leaves scanning
+// profile-aware while parsing is not, and every note fails to parse.
+func TestRebuildAppliesWorkspaceIngestProfile(t *testing.T) {
+	root := t.TempDir()
+	writeNote(t, root, filepath.Join("topics", "alpha.md"), "---\ntitle: Alpha\nkeywords: [pop]\ndepth: hub\ndepends_on: [beta.md]\n---\n\n# Alpha\n")
+	writeNote(t, root, filepath.Join("topics", "beta.md"), "---\ntitle: Beta\ndepth: detail\n---\n\n# Beta\n")
+	writeNote(t, root, filepath.Join("topics", "skipped", "gamma.md"), "---\ntitle: Gamma\n---\n\n# Gamma\n")
+	if err := os.MkdirAll(filepath.Join(root, ".gomental"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	profile := "version: 1\n" +
+		"rules:\n" +
+		"  - match: \"topics/**\"\n" +
+		"    defaults:\n" +
+		"      type: topic\n" +
+		"    searchAliases: [keywords]\n" +
+		"    tagFields: [depth]\n" +
+		"    links:\n" +
+		"      - field: depends_on\n" +
+		"        basePath: topics\n" +
+		"exclude:\n" +
+		"  - \"topics/skipped/**\"\n"
+	if err := os.WriteFile(filepath.Join(root, ".gomental", "mapping.yaml"), []byte(profile), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := Rebuilder{WorkerCount: 2, Now: fixedNow}.Rebuild(context.Background(), root)
+	if err != nil {
+		t.Fatalf("rebuild: %v", err)
+	}
+	// None of these notes declare a type, so without the profile every one of
+	// them fails to parse and the excluded note is still scanned.
+	if result.TotalNotes != 2 || result.ParsedNotes != 2 || result.FailedNotes != 0 {
+		t.Fatalf("unexpected result: %#v", result)
+	}
+
+	store, err := graph.OpenSQLiteStore(result.GraphPath)
+	if err != nil {
+		t.Fatalf("open graph: %v", err)
+	}
+	defer store.Close()
+	backlinks, err := store.Backlinks(context.Background(), "topics/beta")
+	if err != nil {
+		t.Fatalf("backlinks: %v", err)
+	}
+	if len(backlinks) != 1 || backlinks[0].Source != "topics/alpha" {
+		t.Fatalf("frontmatter link did not reach the graph: %#v", backlinks)
+	}
+
+	idx, err := search.OpenBleveIndex(result.SearchPath)
+	if err != nil {
+		t.Fatalf("open search: %v", err)
+	}
+	defer idx.Close()
+	results, err := idx.Search(context.Background(), domain.SearchQuery{Text: "pop", Limit: 10})
+	if err != nil {
+		t.Fatalf("search: %v", err)
+	}
+	if len(results) != 1 || results[0].ID != "topics/alpha" {
+		t.Fatalf("keyword alias is not searchable: %#v", results)
+	}
+	tagged, err := idx.Search(context.Background(), domain.SearchQuery{Text: "alpha", Tags: []domain.Tag{"hub"}, Limit: 10})
+	if err != nil {
+		t.Fatalf("search by tag: %v", err)
+	}
+	if len(tagged) != 1 || tagged[0].ID != "topics/alpha" {
+		t.Fatalf("mapped tag is not filterable: %#v", tagged)
+	}
+}

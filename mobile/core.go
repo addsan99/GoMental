@@ -513,6 +513,7 @@ func (c *Core) reload(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("mobile: open repository workspace: %w", err)
 	}
+	okf.SetActiveMapping(ws.Mapping())
 	repository := workspace.NewFileNoteRepository(ws)
 	summaries, err := repository.List(ctx)
 	if err != nil {
