@@ -31,17 +31,25 @@ func NewParser() Parser {
 func (p Parser) ParseNote(id domain.NoteID, raw string, modifiedAt time.Time) (domain.ParsedOKFNote, error) {
 	frontmatter, body, err := splitFrontmatter(raw)
 	if err != nil {
-		return domain.ParsedOKFNote{}, err
+		decodeErr, ok := err.(domain.DecodeError)
+		if !ok || decodeErr.Code != "okf.missing_frontmatter" || !hasDefaultType(id) {
+			return domain.ParsedOKFNote{}, err
+		}
+		// The workspace's ingest profile supplies a type for this path, so a file
+		// without frontmatter is still a valid note: treat it as all body.
+		frontmatter, body = "", raw
 	}
 	metadata, err := parseMetadata(frontmatter)
 	if err != nil {
 		return domain.ParsedOKFNote{}, err
 	}
+	applyDefaults(id, &metadata)
+	applyMappedTags(id, &metadata)
 	if strings.TrimSpace(metadata.Type) == "" {
 		return domain.ParsedOKFNote{}, domain.DecodeError{Code: "okf.missing_type", Message: "OKF concept document is missing required type"}
 	}
 	headings := extractHeadings(body)
-	links := extractLinks(id, body)
+	links := rewriteTargets(append(extractLinks(id, body), mappedLinks(id, metadata)...))
 	title := chooseTitle(metadata.Title, headings, id)
 	return domain.ParsedOKFNote{
 		ID:         id,
@@ -52,6 +60,7 @@ func (p Parser) ParseNote(id domain.NoteID, raw string, modifiedAt time.Time) (d
 		PlainText:  plainText(body),
 		Headings:   headings,
 		Tags:       metadata.Tags,
+		Aliases:    mappedAliases(id, metadata),
 		Links:      links,
 		ModifiedAt: modifiedAt,
 	}, nil

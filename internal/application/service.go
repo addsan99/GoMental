@@ -23,6 +23,7 @@ import (
 	"GoMental/internal/graph"
 	"GoMental/internal/importers"
 	"GoMental/internal/indexing"
+	"GoMental/internal/ingest"
 	"GoMental/internal/okf"
 	"GoMental/internal/platform"
 	"GoMental/internal/search"
@@ -422,6 +423,8 @@ func (s *Service) OpenWorkspace(ctx context.Context, root string) (WorkspaceDTO,
 	if err != nil {
 		return WorkspaceDTO{}, appErr(ErrWorkspaceInaccessible, "Could not open workspace", err)
 	}
+	// Install the ingest profile before anything parses notes from this root.
+	okf.SetActiveMapping(ws.Mapping())
 	repo := workspace.NewFileNoteRepository(ws)
 	notes, err := repo.List(ctx)
 	if err != nil {
@@ -2485,6 +2488,7 @@ func (s *Service) closeStores() error {
 	s.corpus = nil
 	s.listFromSQLite = false
 	s.workspace = workspace.Workspace{}
+	okf.SetActiveMapping(ingest.Mapping{})
 	return errors.Join(errs...)
 }
 

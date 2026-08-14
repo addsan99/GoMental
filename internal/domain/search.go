@@ -61,6 +61,7 @@ func SearchDocumentFromParsed(note ParsedOKFNote, path NotePath) SearchDocument 
 		Body:        note.PlainText,
 		Headings:    headings,
 		Tags:        note.Tags,
+		Aliases:     note.Aliases,
 		LinkTargets: links,
 		Favorite:    note.Metadata.Favorite,
 		ModifiedAt:  note.ModifiedAt.Unix(),

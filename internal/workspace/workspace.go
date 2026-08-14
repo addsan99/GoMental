@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"GoMental/internal/domain"
+	"GoMental/internal/ingest"
 )
 
 const DefaultMetadataDir = ".workspace"
@@ -14,6 +15,7 @@ const DefaultMetadataDir = ".workspace"
 type Workspace struct {
 	root        string
 	metadataDir string
+	mapping     ingest.Mapping
 }
 
 func Open(root string) (Workspace, error) {
@@ -39,7 +41,16 @@ func OpenWithMetadataDir(root, metadataDir string) (Workspace, error) {
 	if !info.IsDir() {
 		return Workspace{}, fmt.Errorf("%w: not a directory", ErrInvalidWorkspaceRoot)
 	}
-	return Workspace{root: clean, metadataDir: metadataDir}, nil
+	mapping, err := ingest.Load(clean)
+	if err != nil {
+		return Workspace{}, fmt.Errorf("%w: %v", ErrInvalidWorkspaceRoot, err)
+	}
+	return Workspace{root: clean, metadataDir: metadataDir, mapping: mapping}, nil
+}
+
+// Mapping returns the workspace's ingest profile (zero value when it has none).
+func (w Workspace) Mapping() ingest.Mapping {
+	return w.mapping
 }
 
 func (w Workspace) Root() string {

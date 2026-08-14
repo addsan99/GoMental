@@ -2,6 +2,8 @@
 
 GoMental is a local-first desktop note-taking and knowledge graph app written in Go with Wails, React, and TypeScript. Notes are stored as Google's Open Knowledge Format (OKF) Markdown concept documents.
 
+A workspace can optionally carry an [ingest profile](docs/INGEST_PROFILES.md) that lets GoMental read a Markdown corpus authored elsewhere — such as an [AI-Overload](profiles/ai-overload/) repo overload — without changing how anything else works.
+
 ## Development
 
 Run commands from the project root.

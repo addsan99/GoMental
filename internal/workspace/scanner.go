@@ -51,6 +51,9 @@ func (w Workspace) ScanNotes(ctx context.Context) ([]ScannedNote, error) {
 			}
 			return err
 		}
+		if w.mapping.Excluded(string(id)) {
+			return nil
+		}
 		key := caseFoldKey(id)
 		if existing, ok := seen[key]; ok && existing != id {
 			return fmt.Errorf("%w: %s conflicts with %s", ErrDuplicateNoteID, id, existing)
