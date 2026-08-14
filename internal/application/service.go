@@ -1930,10 +1930,13 @@ func normalizeSettings(settings Settings) Settings {
 	if settings.GraphView.DefaultMode != "3d" && settings.GraphView.DefaultMode != "2d" {
 		settings.GraphView.DefaultMode = defaults.GraphView.DefaultMode
 	}
-	if settings.GraphView.DefaultDepth < 1 {
+	// Depth is either a hop count (1..4) or the negative "unbounded" sentinel,
+	// so it is normalised rather than clamped into a range.
+	if settings.GraphView.DefaultDepth < 0 {
+		settings.GraphView.DefaultDepth = domain.GraphDepthUnbounded
+	} else if settings.GraphView.DefaultDepth < 1 {
 		settings.GraphView.DefaultDepth = defaults.GraphView.DefaultDepth
-	}
-	if settings.GraphView.DefaultDepth > 4 {
+	} else if settings.GraphView.DefaultDepth > 4 {
 		settings.GraphView.DefaultDepth = 4
 	}
 	if settings.Workspaces == nil {

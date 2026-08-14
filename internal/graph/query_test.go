@@ -185,3 +185,55 @@ func TestQueryFullGraphIncludesIsolatedNotes(t *testing.T) {
 		t.Fatalf("expected path-scoped notes, got %#v", scoped.Nodes)
 	}
 }
+
+// A negative depth means "no hop limit": the seed still focuses the view, but
+// the selection covers every note, including ones the seed cannot reach at all.
+// Metadata predicates still apply, since unbounded only removes the hop bound.
+func TestQueryUnboundedDepthSelectsEveryNote(t *testing.T) {
+	store := openStore(t, filepath.Join(t.TempDir(), "graph.sqlite"))
+	ctx := context.Background()
+
+	// A chain alpha -> beta -> gamma, plus an island with no path to the seed.
+	beta := domain.NoteID("beta")
+	gamma := domain.NoteID("gamma")
+	if err := store.ReplaceOutgoingLinks(ctx, "alpha", []domain.NoteLink{{Target: "beta", ResolvedID: &beta, Strength: domain.LinkStrengthHard}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.ReplaceOutgoingLinks(ctx, "beta", []domain.NoteLink{{Target: "gamma", ResolvedID: &gamma, Strength: domain.LinkStrengthHard}}); err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []string{"alpha", "beta", "gamma", "island"} {
+		if err := store.UpsertNoteMeta(ctx, NoteMeta{ID: domain.NoteID(id), Type: "concept"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// Depth 1 stops at the seed's immediate neighbour.
+	shallow, err := store.Query(ctx, domain.GraphQuery{Seed: idPtr("alpha"), Depth: 1})
+	if err != nil {
+		t.Fatalf("query: %v", err)
+	}
+	if hasNode(shallow, "gamma") || hasNode(shallow, "island") {
+		t.Fatalf("depth 1 should stop at beta, got %#v", shallow.Nodes)
+	}
+
+	// Unbounded reaches the far end of the chain and the disconnected island.
+	full, err := store.Query(ctx, domain.GraphQuery{Seed: idPtr("alpha"), Depth: domain.GraphDepthUnbounded})
+	if err != nil {
+		t.Fatalf("query: %v", err)
+	}
+	for _, id := range []string{"alpha", "beta", "gamma", "island"} {
+		if !hasNode(full, id) {
+			t.Fatalf("unbounded depth should include %q, got %#v", id, full.Nodes)
+		}
+	}
+
+	// The hop bound is the only thing dropped — predicates still narrow the set.
+	filtered, err := store.Query(ctx, domain.GraphQuery{Seed: idPtr("alpha"), Depth: domain.GraphDepthUnbounded, Types: []string{"other"}})
+	if err != nil {
+		t.Fatalf("query: %v", err)
+	}
+	if len(filtered.Nodes) != 0 {
+		t.Fatalf("type predicate should still apply when unbounded, got %#v", filtered.Nodes)
+	}
+}

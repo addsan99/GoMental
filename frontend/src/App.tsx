@@ -14,6 +14,7 @@ import FindBar from './ui/FindBar';
 import {basename, errorMessage} from './util';
 import {FacetFilters, facetMatchesNote, anyFacetActive, folderOf} from './ui/graph/filters';
 import type {FacetFilter, FacetOption} from './ui/graph/filters';
+import {DEPTH_OPTIONS, depthLabel} from './ui/graph/palette';
 import {
   AppMark,
   Wordmark,
@@ -2775,15 +2776,15 @@ function SettingsModal({
                   </span>
                   <input
                     type="range"
-                    min={1}
-                    max={4}
-                    value={settings.graphView.defaultDepth}
+                    min={0}
+                    max={DEPTH_OPTIONS.length - 1}
+                    value={Math.max(0, DEPTH_OPTIONS.indexOf(settings.graphView.defaultDepth))}
                     onChange={(event) => onChange({
                       ...settings,
-                      graphView: {...settings.graphView, defaultDepth: Number(event.target.value)},
+                      graphView: {...settings.graphView, defaultDepth: DEPTH_OPTIONS[Number(event.target.value)] ?? DEPTH_OPTIONS[0]},
                     })}
                   />
-                  <b className="gm-setting-value">{settings.graphView.defaultDepth}</b>
+                  <b className="gm-setting-value">{depthLabel(settings.graphView.defaultDepth)}</b>
                 </label>
               </SettingsGroup>
             )}
@@ -3484,7 +3485,11 @@ function normalizeSettings(value: GoMentalSettings): GoMentalSettings {
   const defaultMode = value?.graphView?.defaultMode === '3d' || value?.graphView?.defaultMode === '2d'
     ? value.graphView.defaultMode
     : DEFAULT_SETTINGS.graphView.defaultMode;
-  const defaultDepth = clamp(Number(value?.graphView?.defaultDepth) || DEFAULT_SETTINGS.graphView.defaultDepth, 1, 4);
+  // Depth is one of the DEPTH_OPTIONS stops; anything else (including a stale
+  // value from an older build) falls back to the default. The last stop is the
+  // negative "unbounded" sentinel, so this can't be a numeric clamp.
+  const rawDepth = Number(value?.graphView?.defaultDepth);
+  const defaultDepth = DEPTH_OPTIONS.includes(rawDepth) ? rawDepth : DEFAULT_SETTINGS.graphView.defaultDepth;
   const workspaces: Record<string, GoMentalWorkspaceSettings> = {};
   for (const [path, workspaceSettings] of Object.entries(value?.workspaces || {})) {
     const trimmedPath = path.trim();

@@ -107,6 +107,12 @@ type GraphFilter struct {
 	Depth                int
 }
 
+// GraphDepthUnbounded asks a seeded GraphQuery to skip the hop limit entirely:
+// the whole note set is selected, exactly as for an unseeded query, while the
+// seed is still reported so callers can keep focusing and shading around it.
+// Any negative depth is treated this way.
+const GraphDepthUnbounded = -1
+
 // GraphQuery is the unified selection request that generalizes Neighborhood and
 // FullGraph. When Seed is nil the query is a full-graph selection; when Seed is
 // set it is a depth-bounded neighborhood around that note. In both cases the
@@ -117,7 +123,7 @@ type GraphFilter struct {
 type GraphQuery struct {
 	Seed         *NoteID // optional focus note; nil = full graph
 	MetadataSeed string  // optional metadata hub focus (e.g. "tag:go")
-	Depth        int     // hops from Seed/MetadataSeed; ignored when both are empty
+	Depth        int     // hops from Seed/MetadataSeed; ignored when both are empty, unbounded when negative
 
 	// Metadata predicates restricting which note nodes are included.
 	Types         []string

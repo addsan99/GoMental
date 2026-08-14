@@ -494,16 +494,21 @@ func (s *SQLiteStore) FullGraph(ctx context.Context, filter domain.GraphFilter) 
 
 // Query is the unified graph selection backing both the neighborhood and
 // full-graph views (see domain.GraphQuery). When Seed is nil it selects the full
-// note set; when Seed is set it selects the depth-bounded neighborhood around it.
-// In both cases the metadata predicates (Types/Tags/PathPrefix) restrict which
-// note nodes are kept. Unlike the legacy Neighborhood, a seeded Query honors
-// IncludeMetadataLinks: facet-hub edges from the kept notes are included when
-// requested — closing the "metadata links do nothing when a note is selected"
-// gap. Metadata hubs are never traversed for reachability.
+// note set; when Seed is set it selects the depth-bounded neighborhood around it,
+// or the full note set when the depth is unbounded (negative). In both cases the
+// metadata predicates (Types/Tags/PathPrefix) restrict which note nodes are kept.
+// Unlike the legacy Neighborhood, a seeded Query honors IncludeMetadataLinks:
+// facet-hub edges from the kept notes are included when requested — closing the
+// "metadata links do nothing when a note is selected" gap. Metadata hubs are
+// never traversed for reachability.
 func (s *SQLiteStore) Query(ctx context.Context, q domain.GraphQuery) (domain.Graph, error) {
 	// Reachable node-id set for a seeded neighborhood; nil means "full graph".
 	var frontier map[string]struct{}
-	if q.MetadataSeed != "" {
+	switch {
+	case q.Depth < 0:
+		// Unbounded: the seed still focuses the view for the caller, but no hop
+		// limit applies, so leave the frontier nil to select every note.
+	case q.MetadataSeed != "":
 		depth := q.Depth
 		if depth <= 0 {
 			depth = 1
@@ -513,7 +518,7 @@ func (s *SQLiteStore) Query(ctx context.Context, q domain.GraphQuery) (domain.Gr
 			return domain.Graph{}, err
 		}
 		frontier = f
-	} else if q.Seed != nil {
+	case q.Seed != nil:
 		depth := q.Depth
 		if depth <= 0 {
 			depth = 1

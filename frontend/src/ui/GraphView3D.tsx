@@ -26,6 +26,7 @@ import {
   HUB_NODE_KINDS,
   MAX_DEPTH_HOPS,
   backgroundColor,
+  depthLabel,
   depthShade,
   edgeColor,
   labelColor,
@@ -139,8 +140,9 @@ const SELECTED_VAL = 18;
 const NODE_RENDER_CAP = 2500;
 // Above this many nodes, an UNFOCUSED graph collapses into one super-node per
 // group (folder/type/tag) — an overview you drill into by clicking a group, which
-// narrows the query via the matching facet. Focused (seeded) graphs are bounded by
-// depth and never aggregate.
+// narrows the query via the matching facet. Focused (seeded) graphs never
+// aggregate: they are normally bounded by depth, and at the unbounded "Max" stop
+// the render cap keeps them tractable instead.
 const AGGREGATE_THRESHOLD = 1500;
 // Which facet axis a group-by drills into when an aggregate super-node is clicked.
 const GROUPBY_AXIS: Record<string, 'types' | 'tags' | 'folders'> = {type: 'types', tag: 'tags', folder: 'folders'};
@@ -1372,21 +1374,25 @@ export function GraphView3D({
 
         <div className="gm-graph-opt">
           <label className="gm-graph-opt-label" htmlFor={`gm-depth-${flat ? '2d' : '3d'}`}>
-            Depth <span className="gm-graph-opt-value">{depth}</span>
+            Depth <span className="gm-graph-opt-value">{depthLabel(depth)}</span>
           </label>
           <input
             id={`gm-depth-${flat ? '2d' : '3d'}`}
             type="range"
-            min={DEPTH_OPTIONS[0]}
-            max={DEPTH_OPTIONS[DEPTH_OPTIONS.length - 1]}
+            min={0}
+            max={DEPTH_OPTIONS.length - 1}
             step={1}
-            value={depth}
-            onChange={(event) => onDepthChange(Number(event.target.value))}
+            // The stops are not a linear scale (the last one is "no limit"), so the
+            // slider runs over option indices and maps back to the value.
+            value={Math.max(0, DEPTH_OPTIONS.indexOf(depth))}
+            onChange={(event) => onDepthChange(DEPTH_OPTIONS[Number(event.target.value)] ?? DEPTH_OPTIONS[0])}
           />
           <div className="gm-graph-ticks">
-            {DEPTH_OPTIONS.map((value) => <span key={value}>{value}</span>)}
+            {DEPTH_OPTIONS.map((value) => <span key={value}>{depthLabel(value)}</span>)}
           </div>
-          <p className="gm-graph-opt-hint">Nodes within this many hops of the focused note.</p>
+          <p className="gm-graph-opt-hint">
+            {depth < 0 ? 'Every note in the workspace.' : 'Nodes within this many hops of the focused note.'}
+          </p>
         </div>
 
         <div className="gm-graph-opt">
