@@ -146,6 +146,17 @@ const NOTE_ZOOM_MIN = 0.75;
 const NOTE_ZOOM_MAX = 2;
 const NOTE_ZOOM_STEP = 0.1;
 
+// Step the zoom onto the next multiple of NOTE_ZOOM_STEP rather than adding the
+// step to the current value. The minimum (75%) is not itself a multiple of the
+// step, so plain addition walks a 75/85/95/105% ladder that steps straight over
+// 100%. Snapping to the grid guarantees 100% is always reachable, while the
+// clamp keeps the min and max themselves selectable at the ends.
+function stepNoteZoom(current: number, direction: 1 | -1): number {
+  const steps = current / NOTE_ZOOM_STEP;
+  const next = direction > 0 ? Math.floor(steps + 1e-6) + 1 : Math.ceil(steps - 1e-6) - 1;
+  return clamp(Math.round(next * NOTE_ZOOM_STEP * 100) / 100, NOTE_ZOOM_MIN, NOTE_ZOOM_MAX);
+}
+
 const emptyInfo: AppInfoWithMode = {
   name: 'GoMental',
   description: 'Local-first OKF notes and knowledge graph',
@@ -292,10 +303,10 @@ function App() {
   }, []);
 
   const zoomInNote = useCallback(() => {
-    setNoteZoom((current) => Math.min(NOTE_ZOOM_MAX, Math.round((current + NOTE_ZOOM_STEP) * 100) / 100));
+    setNoteZoom((current) => stepNoteZoom(current, 1));
   }, []);
   const zoomOutNote = useCallback(() => {
-    setNoteZoom((current) => Math.max(NOTE_ZOOM_MIN, Math.round((current - NOTE_ZOOM_STEP) * 100) / 100));
+    setNoteZoom((current) => stepNoteZoom(current, -1));
   }, []);
   const resetNoteZoom = useCallback(() => setNoteZoom(settings.appearance.defaultZoom), [settings.appearance.defaultZoom]);
 
@@ -1332,7 +1343,12 @@ function App() {
     }
     const el = container.querySelector<HTMLElement>(`[data-anchor="${anchor}"]`);
     if (el) {
-      container.scrollTo({top: el.offsetTop - 16, behavior: 'smooth'});
+      // The article sits inside a CSS `zoom` wrapper, so offsetTop reports the
+      // heading's position in unscaled layout pixels while scrollTop is in the
+      // container's own (scaled) pixels — scrolling to it under- or overshoots by
+      // the zoom factor. Measuring both rects keeps the two in the same space.
+      const top = el.getBoundingClientRect().top - container.getBoundingClientRect().top + container.scrollTop - 16;
+      container.scrollTo({top: Math.max(0, top), behavior: 'smooth'});
       setActiveAnchor(anchor);
     }
   }, []);
