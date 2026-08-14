@@ -62,6 +62,9 @@ func (w Workspace) NormalizeNoteID(raw string) (domain.NoteID, error) {
 	if filepath.IsAbs(raw) || strings.HasPrefix(raw, "/") || strings.HasPrefix(raw, `\\`) {
 		return "", fmt.Errorf("%w: absolute path", ErrInvalidNoteID)
 	}
+	if len(raw) >= 3 && isWindowsDrivePrefix(raw) {
+		return "", fmt.Errorf("%w: absolute path", ErrInvalidNoteID)
+	}
 	slashed := strings.ReplaceAll(raw, `\\`, "/")
 	clean := filepath.ToSlash(filepath.Clean(filepath.FromSlash(slashed)))
 	if clean == "." || clean == ".." || strings.HasPrefix(clean, "../") || strings.Contains(clean, "/../") {
@@ -77,6 +80,12 @@ func (w Workspace) NormalizeNoteID(raw string) (domain.NoteID, error) {
 		return "", ErrReservedNoteID
 	}
 	return domain.NoteID(clean), nil
+}
+
+func isWindowsDrivePrefix(path string) bool {
+	return ((path[0] >= 'A' && path[0] <= 'Z') || (path[0] >= 'a' && path[0] <= 'z')) &&
+		path[1] == ':' &&
+		(path[2] == '/' || path[2] == '\\')
 }
 
 func (w Workspace) PathForNoteID(id domain.NoteID) (string, error) {
