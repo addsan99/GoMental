@@ -248,6 +248,9 @@ function App() {
   // Facet selection (Types / Tags / Folders), owned here and shared by the right-rail
   // filter panel, the note-list tree (hides non-matches), and both graph instances.
   const [facets, setFacets] = useState<FacetFilter>({types: [], tags: [], folders: [], favorites: false});
+  // Declared here rather than beside the note-list filter below because the
+  // search effect reads it too, and hook dependency arrays evaluate in order.
+  const facetsActive = anyFacetActive(facets);
   // Browser-style visit history of note IDs. Every selection path funnels through
   // setSelectedID, so a single effect records history; back/forward/dropdown jumps
   // set suppressHistoryRef to avoid re-recording the entry they navigate to. Stack
@@ -1098,7 +1101,10 @@ function App() {
             tags: [],
             pathPrefix: '',
             favoritesOnly: facets.favorites,
-            limit: 50,
+            // Facets are applied to the returned hits rather than pushed into the
+            // query, so ask for a deeper slice when they are on: otherwise the
+            // cut happens before the filter and thins the list out too far.
+            limit: facetsActive ? 250 : 50,
           });
           if (searchRequestRef.current !== requestID) {
             return;
@@ -1117,7 +1123,7 @@ function App() {
     }, 220);
 
     return () => window.clearTimeout(timer);
-  }, [facets.favorites, searchText, workspace]);
+  }, [facets.favorites, facetsActive, searchText, workspace]);
 
   const handleDraftChange = useCallback((next: string) => {
     setDraft(next);
@@ -1379,8 +1385,8 @@ function App() {
   }, [notes]);
 
   // When any facet is active the note list hides non-matches (user choice); the
-  // graph is filtered separately via the same facets prop.
-  const facetsActive = anyFacetActive(facets);
+  // graph is filtered separately via the same facets prop. `facetsActive` is
+  // declared with the facet state above, since the search effect depends on it.
   const visibleNotes = useMemo(
     () => (facetsActive ? notes.filter((note) => facetMatchesNote(note, facets)) : notes),
     [notes, facets, facetsActive],
@@ -1392,8 +1398,19 @@ function App() {
   const noteSummaryForSelected = notes.find((note) => note.id === selectedID);
   const selectedTags = noteSummaryForSelected?.tags || [];
   const hasSearchQuery = Boolean(searchText.trim());
+  // Search hits carry no metadata of their own, so the facets are applied by
+  // joining each hit back to its note summary — the same predicate the note tree
+  // and the graph use, so the three views can never disagree about a filter.
+  const visibleSearchResults = useMemo(() => {
+    if (!facetsActive) {
+      return searchResults;
+    }
+    const byID = new Map(notes.map((note) => [note.id, note]));
+    return searchResults.filter((result) => facetMatchesNote(byID.get(result.id), facets));
+  }, [searchResults, notes, facets, facetsActive]);
+  const filteredOutSearchCount = searchResults.length - visibleSearchResults.length;
   // Note IDs of the current search hits, passed to the graph to spotlight them.
-  const searchMatchIds = useMemo(() => searchResults.map((result) => result.id), [searchResults]);
+  const searchMatchIds = useMemo(() => visibleSearchResults.map((result) => result.id), [visibleSearchResults]);
 
   // Mount the graph the first time its tab is opened, then keep it mounted.
   useEffect(() => {
@@ -1854,10 +1871,12 @@ function App() {
               <RecentWorkspaceList recent={recent} disabled={interactionBusy} onOpen={(path) => void openWorkspace(path)} />
             ) : hasSearchQuery ? (
               <SearchResultsList
-                results={searchResults}
+                results={visibleSearchResults}
                 status={searchStatus}
                 query={searchText}
                 error={searchError}
+                filteredOut={filteredOutSearchCount}
+                onClearFacets={() => setFacets({types: [], tags: [], folders: [], favorites: false})}
                 onOpen={openSearchResult}
                 onToggleFavorite={toggleNoteFavorite}
               />
@@ -3103,6 +3122,8 @@ function SearchResultsList({
   status,
   query,
   error,
+  filteredOut,
+  onClearFacets,
   onOpen,
   onToggleFavorite,
 }: {
@@ -3110,6 +3131,8 @@ function SearchResultsList({
   status: SearchStatus;
   query: string;
   error: string;
+  filteredOut: number;
+  onClearFacets: () => void;
   onOpen: (id: string) => void;
   onToggleFavorite: (id: string, favorite: boolean) => void;
 }) {
@@ -3121,7 +3144,14 @@ function SearchResultsList({
   }
   return (
     <div className="gm-results">
-      <div className="gm-result-label">{results.length} result{results.length === 1 ? '' : 's'}</div>
+      <div className="gm-result-label">
+        <span>{results.length} result{results.length === 1 ? '' : 's'}</span>
+        {filteredOut > 0 && (
+          <button type="button" className="gm-result-filtered" onClick={onClearFacets} title="Clear the active filters">
+            {filteredOut} hidden by filters
+          </button>
+        )}
+      </div>
       {results.map((result) => (
         <button type="button" className="gm-result" key={result.id} onClick={() => onOpen(result.id)}>
           <div className="gm-result-head">
@@ -3154,7 +3184,11 @@ function SearchResultsList({
           {searchSnippet(result) && <SearchSnippet fragment={searchSnippet(result)} />}
         </button>
       ))}
-      {results.length === 0 && <div className="gm-result-empty">No notes match “{query}”.</div>}
+      {results.length === 0 && (
+        <div className="gm-result-empty">
+          {filteredOut > 0 ? <>No notes match “{query}” with the active filters.</> : <>No notes match “{query}”.</>}
+        </div>
+      )}
     </div>
   );
 }
