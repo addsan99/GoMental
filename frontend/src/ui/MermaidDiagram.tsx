@@ -30,7 +30,8 @@ export function MermaidDiagram({code, theme}: MermaidDiagramProps) {
           theme: theme === 'dark' ? 'base' : 'default',
           themeVariables: theme === 'dark'
             ? {
-                background: '#202329',
+              fontSize: '20px',
+              background: '#202329',
                 primaryColor: '#155e9f',
                 primaryTextColor: '#f8fafc',
                 primaryBorderColor: '#60a5fa',
@@ -48,7 +49,7 @@ export function MermaidDiagram({code, theme}: MermaidDiagramProps) {
                 clusterBorder: '#94a3b8',
                 edgeLabelBackground: '#30343b',
               }
-            : undefined,
+            : {fontSize: '20px'},
         });
         const {svg} = await mermaid.render(id, code.trim());
         if (cancelled) {

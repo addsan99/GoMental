@@ -711,7 +711,7 @@ body.gm-resizing * { cursor: col-resize !important; }
 /* ---- Rendered article ---- */
 .gm-article-scroll { flex: 1; overflow: auto; min-height: 0; }
 .gm-note-scale { width: 100%; transform-origin: top center; }
-.gm-article { max-width: 1000px; margin: 0 auto; padding: 36px 48px 120px; animation: gm-fade .25s ease; }
+.gm-article { max-width: 1400px; margin: 0 auto; padding: 36px 48px 120px; animation: gm-fade .25s ease; }
 
 /* The context menu is scoped to the note pane, keeping graph and shell-native
    right-click behavior untouched. CSS zoom scales text, diagrams, and images
@@ -904,7 +904,7 @@ body.gm-resizing * { cursor: col-resize !important; }
 .gm-callout-body { font: 400 16px/1.6 var(--font-read); color: var(--text); }
 
 /* MdxNoteEditor when editing inside the article scroll */
-.gm-article-editor-wrap { max-width: 1000px; margin: 0 auto; padding: 24px 48px 96px; animation: gm-fade .2s ease; }
+.gm-article-editor-wrap { max-width: 1400px; margin: 0 auto; padding: 24px 48px 96px; animation: gm-fade .2s ease; }
 
 /* ---- Rich (MDX) editor ---- */
 /* OKF frontmatter disclosure is app-owned markup, so it doesn't pick up the
@@ -985,7 +985,7 @@ body.gm-resizing * { cursor: col-resize !important; }
 
 /* ---- Source view ---- */
 .gm-source-scroll { flex: 1; overflow: auto; min-height: 0; background: var(--bg); }
-.gm-source-wrap { max-width: 1000px; margin: 0 auto; padding: 28px 32px 96px; }
+.gm-source-wrap { max-width: 1400px; margin: 0 auto; padding: 28px 32px 96px; }
 .gm-source-card { border: 1px solid var(--border); border-radius: 12px; overflow: hidden; background: var(--surface); box-shadow: var(--shadow-sm); }
 .gm-source-titlebar {
   display: flex; align-items: center; gap: 8px; padding: 9px 14px;
