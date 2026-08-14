@@ -319,7 +319,9 @@ type Settings struct {
 }
 
 type AppearanceSettings struct {
-	Theme string `json:"theme"`
+	Theme       string  `json:"theme"`
+	ReadingFont string  `json:"readingFont"`
+	DefaultZoom float64 `json:"defaultZoom"`
 }
 
 type NoteViewSettings struct {
@@ -1880,7 +1882,9 @@ func defaultSettings() Settings {
 	return Settings{
 		Version: 3,
 		Appearance: AppearanceSettings{
-			Theme: "dark",
+			Theme:       "dark",
+			ReadingFont: "newsreader",
+			DefaultZoom: 1,
 		},
 		NoteView: NoteViewSettings{
 			DefaultEditMode: "rich",
@@ -1909,6 +1913,13 @@ func normalizeSettings(settings Settings) Settings {
 	settings.Appearance.Theme = strings.TrimSpace(settings.Appearance.Theme)
 	if settings.Appearance.Theme == "" {
 		settings.Appearance.Theme = defaults.Appearance.Theme
+	}
+	settings.Appearance.ReadingFont = strings.TrimSpace(settings.Appearance.ReadingFont)
+	if !isReadingFont(settings.Appearance.ReadingFont) {
+		settings.Appearance.ReadingFont = defaults.Appearance.ReadingFont
+	}
+	if settings.Appearance.DefaultZoom < 0.75 || settings.Appearance.DefaultZoom > 2 {
+		settings.Appearance.DefaultZoom = defaults.Appearance.DefaultZoom
 	}
 	if settings.NoteView.DefaultEditMode != "source" && settings.NoteView.DefaultEditMode != "rich" {
 		settings.NoteView.DefaultEditMode = defaults.NoteView.DefaultEditMode
@@ -1941,6 +1952,15 @@ func normalizeSettings(settings Settings) Settings {
 		settings.Workspaces[trimmedPath] = normalizedWorkspaceSettings
 	}
 	return settings
+}
+
+func isReadingFont(value string) bool {
+	switch strings.TrimSpace(value) {
+	case "newsreader", "open-sans", "calibri", "roboto", "georgia", "system-serif", "system-sans":
+		return true
+	default:
+		return false
+	}
 }
 
 func normalizeWorkspaceSettings(settings WorkspaceSettings) WorkspaceSettings {
