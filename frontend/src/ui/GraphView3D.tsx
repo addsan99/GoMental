@@ -181,6 +181,11 @@ export function GraphView3D({
   // Whether the current node positions were pinned by the deterministic zoned
   // engine. Lets the live-sim path know it must release those pins.
   const deterministicPinnedRef = useRef(false);
+  // Whether the current node positions were pinned by the restored {x,y} layout in
+  // load(). Those pins are wanted by the flat force view (they are what makes a
+  // hand-arranged map persist) but they freeze every other live layout, so the
+  // radial path has to know they are there in order to release them.
+  const savedPinnedRef = useRef(false);
   // Radial layout bookkeeping: whether the soft radial force is installed, and the
   // node currently anchored at the centre (so we can release it when leaving).
   const radialInstalledRef = useRef(false);
@@ -421,15 +426,17 @@ export function GraphView3D({
       }
       setHiddenCount(hidden);
       // Restore the saved {x,y} layout unless it has degenerated to a near-line
-      // (the "diagonal stretch" bug): a stretched layout, restored and pinned,
-      // can't be fixed by the sim. Skipping it lets the force layout respread and
-      // re-persist a healthy layout, so it self-heals instead of needing a manual
-      // layout round-trip.
+      // (the "diagonal stretch" bug) or no longer covers the graph. A stretched or
+      // barely-matching layout, restored and pinned, can't be fixed by the sim.
+      // Skipping it lets the force layout respread and re-persist a healthy
+      // layout, so it self-heals instead of needing a manual layout round-trip.
       const hadSaved =
-        useSaved && saved && !isDegenerateLayout(saved.coordinates)
+        useSaved && saved && !isDegenerateLayout(saved.coordinates) && coversGraph(built.nodes, saved.coordinates)
           ? applySavedLayout(built.nodes, saved.coordinates)
           : false;
       persistOnSettleRef.current = useSaved && !hadSaved;
+      savedPinnedRef.current = hadSaved;
+      deterministicPinnedRef.current = false;
       selectedGraphIdRef.current = built.nodes.find((n) => n.selected)?.id ?? null;
       setData(built);
       framePendingRef.current = true;
@@ -619,17 +626,21 @@ export function GraphView3D({
           }
         }
         deterministicPinnedRef.current = true;
+        savedPinnedRef.current = false;
         appliedDistanceRef.current = nodeDistance;
         setHulls(flat ? result.hulls ?? [] : []);
         fg.d3ReheatSimulation();
         return;
       }
 
-      // force / radial share the live simulation. Release any deterministic pins
-      // left by a prior zoned layout so the sim can move nodes. A fresh force load
-      // keeps its saved-layout pins (applied in load()), so only clear when leaving
-      // a pinned layout.
-      if (deterministicPinnedRef.current) {
+      // force / radial share the live simulation. Release any pins that would stop
+      // the sim from moving nodes. Zoned always pins, so leaving it must always
+      // unpin. Restored saved coordinates also pin, but those are the flat force
+      // view's persisted arrangement and must be kept for `force` — radial has to
+      // drop them, otherwise every node is frozen at its saved spot and the ring
+      // force has nothing to move (the layout silently looks like plain force).
+      const releaseSavedPins = kind === 'radial' && savedPinnedRef.current;
+      if (deterministicPinnedRef.current || releaseSavedPins) {
         for (const node of data.nodes) {
           node.fx = undefined;
           node.fy = undefined;
@@ -639,6 +650,9 @@ export function GraphView3D({
           }
         }
         deterministicPinnedRef.current = false;
+        if (releaseSavedPins) {
+          savedPinnedRef.current = false;
+        }
       }
       setHulls([]);
 
@@ -1556,6 +1570,29 @@ function aggregateGraph(data: GraphData, groupBy: GraphViewState['groupBy'], not
 // and pinned, shows as the "diagonal stretch" bug; detecting it lets us respread
 // instead of honouring it. Rotation-invariant (covariance eigenvalues), so a
 // diagonal line is caught the same as an axis-aligned one.
+// A saved layout is only worth restoring if it still describes most of the graph
+// on screen. Rebuilding the index can change the note set, and applying a layout
+// that only covers a fraction of the nodes pins that fraction at its old
+// coordinates while everything else settles around them — which reads as a
+// broken layout and, being pinned, cannot correct itself. Below this coverage we
+// discard the saved positions and let the sim lay the graph out fresh, which is
+// then persisted in the usual way.
+const SAVED_LAYOUT_MIN_COVERAGE = 0.6;
+
+function coversGraph(nodes: GraphNode[], coords: Record<string, models.LayoutCoordinatesDTO>): boolean {
+  if (nodes.length === 0) {
+    return false;
+  }
+  let known = 0;
+  for (const node of nodes) {
+    const c = coords[node.id];
+    if (c && Number.isFinite(c.x) && Number.isFinite(c.y)) {
+      known += 1;
+    }
+  }
+  return known / nodes.length >= SAVED_LAYOUT_MIN_COVERAGE;
+}
+
 function isDegenerateLayout(coords: Record<string, models.LayoutCoordinatesDTO>): boolean {
   const pts: Array<{x: number; y: number}> = [];
   for (const key in coords) {
