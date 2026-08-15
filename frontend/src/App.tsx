@@ -8,7 +8,7 @@ import LinkPicker from './ui/LinkPicker';
 import SidebarNoteTree from './ui/SidebarNoteTree';
 import Toast from './ui/Toast';
 import NoteContextMenu from './ui/NoteContextMenu';
-import {MarkdownArticle, parseArticle, slugify} from './ui/MarkdownArticle';
+import {MarkdownArticle, frontmatterBlock, parseArticle, slugify} from './ui/MarkdownArticle';
 import type {OutlineEntry} from './ui/MarkdownArticle';
 import FindBar from './ui/FindBar';
 import {basename, errorMessage} from './util';
@@ -282,6 +282,9 @@ function App() {
 
   const mdxEditorRef = useRef<MdxNoteEditorHandle | null>(null);
   const codeMirrorRef = useRef<CodeMirrorEditorHandle | null>(null);
+  // Read-only is derived far below (it needs the workspace settings), but the
+  // source toggle is declared up here, so mirror it into a ref.
+  const readOnlyRef = useRef(false);
   const historyNavRef = useRef<HTMLDivElement | null>(null);
   const openWorkspaceMenuRef = useRef<HTMLDivElement | null>(null);
   const searchRequestRef = useRef(0);
@@ -1306,9 +1309,15 @@ function App() {
   // Toggle between rich (WYSIWYG) and raw markdown (CodeMirror) while editing.
   // The draft is shared between both editors (handleDraftChange), so flipping
   // preserves in-progress content. isEditing stays true throughout.
+  //
+  // In a read-only workspace the same toggle opens the source as a viewer: the
+  // markdown, its YAML frontmatter and anything else the renderer does not show
+  // are still worth reading, so only editing is withheld, not looking.
   const toggleSourceMode = useCallback(() => {
     setActiveTab('note');
-    setIsEditing(true);
+    if (!readOnlyRef.current) {
+      setIsEditing(true);
+    }
     setRawMode((current) => !current);
   }, []);
 
@@ -1442,6 +1451,10 @@ function App() {
     () => parseArticle(renderContent, noteSummaryForSelected?.title || basename(selectedID)),
     [renderContent, noteSummaryForSelected?.title, selectedID],
   );
+
+  // The note's YAML frontmatter verbatim. The article renderer drops it, so
+  // without this it is only visible by reading the source.
+  const frontmatterText = useMemo(() => frontmatterBlock(renderContent), [renderContent]);
 
   // Outgoing wiki-links extracted from the note content (resolved to loaded notes).
   const linkedNotes = useMemo(
@@ -1579,6 +1592,7 @@ function App() {
   const currentWorkspaceSettings = workspace?.root ? workspaceSettingsFor(settings, workspace.root) : defaultWorkspaceSettings();
   const workspaceReadOnly = Boolean(workspace && currentWorkspaceSettings.accessMode !== 'editable' && currentWorkspaceSettings.accessMode !== 'writableGit');
   const readOnly = info.readOnly === true || workspaceReadOnly;
+  readOnlyRef.current = readOnly;
   const showSaveBar = Boolean(selectedNote) && !readOnly;
   const git = info.git ?? null;
   const writableGit = currentWorkspaceSettings.accessMode === 'writableGit' || info.mode === 'writable-git';
@@ -1981,6 +1995,21 @@ function App() {
                 <span className="gm-breadcrumb-file">{fileNameShort || 'No note selected'}</span>
               </div>
               </div>
+              {/* Read-only hides the save bar, and with it the source toggle.
+                  Reading the source is not authoring, so offer it on its own. */}
+              {readOnly && selectedNote && (
+                <div className="gm-subheader-actions">
+                  <button
+                    type="button"
+                    className={rawMode ? 'gm-btn gm-btn-toggle active' : 'gm-btn gm-btn-toggle'}
+                    onClick={toggleSourceMode}
+                    aria-pressed={rawMode}
+                    title={rawMode ? 'Back to the rendered note' : 'View the markdown source, including frontmatter'}
+                  >
+                    <CodeIcon size={15} />View source
+                  </button>
+                </div>
+              )}
               {showSaveBar && (
                 <div className="gm-subheader-actions">
                   {isEditing ? (
@@ -2175,13 +2204,15 @@ function App() {
                       <div className="gm-source-card">
                         <div className="gm-source-titlebar">
                           <span className="gm-source-filename">{fileNameShort}.md</span>
+                          {readOnly && <span className="gm-source-badge">Read-only</span>}
                         </div>
                         <div className="gm-source-editor">
                           <Suspense fallback={<div className="gm-empty"><h2>Loading editor…</h2></div>}>
                             <CodeMirrorEditor
                               ref={codeMirrorRef}
-                              value={draft}
+                              value={readOnly ? renderContent : draft}
                               notes={notes}
+                              disabled={readOnly}
                               theme={themeAppearance(theme)}
                               onChange={handleDraftChange}
                               onSave={() => saveCurrentNote(true)}
@@ -2299,6 +2330,15 @@ function App() {
                   <DetailRow label="Backlinks" value={String(backlinks.length)} />
                 </div>
               </div>
+
+              {selectedNoteReady && frontmatterText && (
+                <div className="gm-rail-block">
+                  <details className="gm-frontmatter" open>
+                    <summary className="gm-section-title gm-rail-title">Frontmatter</summary>
+                    <pre className="gm-frontmatter-body">{frontmatterText}</pre>
+                  </details>
+                </div>
+              )}
 
               <div className="gm-rail-block">
                 <div className="gm-rail-heading">

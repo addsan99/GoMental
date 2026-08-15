@@ -218,8 +218,23 @@ function splitTableRow(row: string): string[] {
     .map((cell) => cell.trim());
 }
 
-function splitFrontmatter(content: string): {frontmatter: Record<string, string>; body: string} {
-  const normalized = content.replace(/\r\n/g, '\n');
+// The YAML frontmatter exactly as written, without the --- fences, or '' when
+// the note has none. The renderer drops frontmatter and splitFrontmatter only
+// keeps flat `key: value` scalars, so nested maps and lists — which OKF types
+// lean on — would be lost. Returning the block verbatim keeps it readable.
+export function frontmatterBlock(rawContent: string): string {
+  const normalized = (rawContent || '').replace(/\r\n/g, '\n');
+  if (!normalized.startsWith('---\n')) {
+    return '';
+  }
+  const end = normalized.indexOf('\n---', 4);
+  if (end < 0) {
+    return '';
+  }
+  return normalized.slice(4, end).replace(/\s+$/, '');
+}
+
+function splitFrontmatter(content: string): {frontmatter: Record<string, string>; body: string} {  const normalized = content.replace(/\r\n/g, '\n');
   if (!normalized.startsWith('---\n')) {
     return {frontmatter: {}, body: normalized};
   }

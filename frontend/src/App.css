@@ -1001,6 +1001,11 @@ body.gm-resizing * { cursor: col-resize !important; }
   font: 500 12px/1 var(--font-mono); color: var(--text-3);
 }
 .gm-source-filename { margin-left: 2px; }
+.gm-source-badge {
+  margin-left: auto; padding: 2px 8px; border-radius: 999px;
+  background: var(--surface); border: 1px solid var(--border);
+  font: 500 10.5px/1.5 var(--font-ui); letter-spacing: .03em; color: var(--text-3);
+}
 .gm-source-editor { min-height: 60vh; display: flex; }
 .gm-source-editor .editor-surface { min-height: 60vh; width: 100%; background: transparent; }
 .gm-source-editor .cm-editor { height: 100%; width: 100%; outline: none; background: transparent; }
@@ -1078,6 +1083,19 @@ body.gm-resizing * { cursor: col-resize !important; }
 .gm-rail-empty { font: 400 13px/1.5 var(--font-ui); color: var(--text-3); }
 .gm-rail-heading { display: flex; align-items: center; gap: 7px; margin-bottom: 12px; }
 .gm-pill { font: 500 10.5px/1 var(--font-mono); color: var(--text-3); background: var(--surface-2); border-radius: 9999px; padding: 2px 7px; }
+
+/* Rail frontmatter block: the raw YAML, collapsible so a long header can be
+   folded away without hiding the sections below it. */
+.gm-frontmatter > summary { cursor: pointer; list-style: none; user-select: none; }
+.gm-frontmatter > summary::-webkit-details-marker { display: none; }
+.gm-frontmatter > summary::before { content: '▾ '; color: var(--text-3); }
+.gm-frontmatter:not([open]) > summary::before { content: '▸ '; }
+.gm-frontmatter-body {
+  margin: 0; padding: 10px 12px; max-height: 320px; overflow: auto;
+  background: var(--surface-2); border: 1px solid var(--border); border-radius: 8px;
+  font: 400 11.5px/1.65 var(--font-mono); color: var(--text-2);
+  white-space: pre-wrap; overflow-wrap: anywhere;
+}
 
 /* Shared facet badge lists (rail Filters block + graph options pane). */
 .gm-facet-filters { display: flex; flex-direction: column; gap: 18px; }
