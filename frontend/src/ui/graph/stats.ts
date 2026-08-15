@@ -1,13 +1,14 @@
 // Visible-count reporting shared by the graph renderer.
 import type {GraphData, LinkType} from './model';
-import {HUB_NODE_KINDS} from './palette';
 
 // Count nodes and the links that are actually visible under the current
-// link-type toggles (hub nodes only count when metadata links are on).
+// link-type toggles. Only real notes count towards "notes": facet hubs and
+// unresolved link targets are rendered nodes but not notes, and counting them
+// made the tally read several times the size of the workspace.
 export function reportStats(data: GraphData, linkTypes: Record<LinkType, boolean>, onStats: (s: {notes: number; links: number}) => void) {
   let notes = 0;
   for (const node of data.nodes) {
-    if (HUB_NODE_KINDS.has(node.kind) && !linkTypes.metadata) {
+    if (node.kind !== 'note') {
       continue;
     }
     notes += 1;
