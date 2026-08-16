@@ -1067,7 +1067,7 @@ func (s *Service) SuggestLinks(ctx context.Context, input SuggestLinksRequest) (
 	if idx == nil {
 		return SuggestLinksResponse{}, appErr("suggestions.unavailable", "Suggestions are not ready", nil)
 	}
-	parsed, err := composite.CodecFor(ws, id).Decode(id, input.Content, time.Time{})
+	parsed, err := composite.Decode(ws, id, input.Content, time.Time{})
 	if err != nil {
 		return SuggestLinksResponse{}, appErr(ErrOKFDecodeFailed, "Could not decode draft", err)
 	}
@@ -1300,7 +1300,7 @@ func (s *Service) ExpandContext(ctx context.Context, id string, depth int) (Expa
 	if err != nil {
 		return ExpandContextDTO{}, appErr("notes.read_failed", "Could not read note", err)
 	}
-	focusParsed, err := composite.CodecFor(repo.Workspace(), focus.ID).Decode(focus.ID, focus.Document.Raw, focus.ModifiedAt)
+	focusParsed, err := composite.Decode(repo.Workspace(), focus.ID, focus.Document.Raw, focus.ModifiedAt)
 	if err != nil {
 		return ExpandContextDTO{}, appErr(ErrOKFDecodeFailed, "Could not parse note", err)
 	}
@@ -1338,7 +1338,7 @@ func (s *Service) ExpandContext(ctx context.Context, id string, depth int) (Expa
 		}
 		excerpt := ""
 		title := n.Label // graph label falls back to the id; prefer the parsed title
-		if parsed, derr := composite.CodecFor(repo.Workspace(), neighbor.ID).Decode(neighbor.ID, neighbor.Document.Raw, neighbor.ModifiedAt); derr == nil {
+		if parsed, derr := composite.Decode(repo.Workspace(), neighbor.ID, neighbor.Document.Raw, neighbor.ModifiedAt); derr == nil {
 			excerpt = truncateRunes(parsed.PlainText, expandExcerptRunes)
 			if parsed.Title != "" {
 				title = parsed.Title
@@ -1360,7 +1360,7 @@ func readParsed(ctx context.Context, repo *workspace.FileNoteRepository, id stri
 	if err != nil {
 		return domain.ParsedOKFNote{}, appErr("notes.read_failed", "Could not read note", err)
 	}
-	parsed, err := composite.CodecFor(repo.Workspace(), note.ID).Decode(note.ID, note.Document.Raw, note.ModifiedAt)
+	parsed, err := composite.Decode(repo.Workspace(), note.ID, note.Document.Raw, note.ModifiedAt)
 	if err != nil {
 		return domain.ParsedOKFNote{}, appErr(ErrOKFDecodeFailed, "Could not parse note", err)
 	}
@@ -2646,7 +2646,7 @@ func updateIncrementalProjections(ctx context.Context, repo *workspace.FileNoteR
 // filesystem walk. Soft-link inference is scheduled separately off the hot path.
 // This keeps save latency independent of corpus size.
 func updateOneProjectionFast(ctx context.Context, repo *workspace.FileNoteRepository, searchIndex *search.BleveIndex, graphStore *graph.SQLiteStore, corpus *liveCorpus, note domain.Note) error {
-	parsed, err := composite.CodecFor(repo.Workspace(), note.ID).Decode(note.ID, note.Document.Raw, note.ModifiedAt)
+	parsed, err := composite.Decode(repo.Workspace(), note.ID, note.Document.Raw, note.ModifiedAt)
 	if err != nil {
 		return err
 	}
@@ -2689,7 +2689,7 @@ func resolverIDs(ctx context.Context, corpus *liveCorpus, repo *workspace.FileNo
 }
 
 func updateOneProjection(ctx context.Context, repo *workspace.FileNoteRepository, searchIndex *search.BleveIndex, graphStore *graph.SQLiteStore, live *liveCorpus, note domain.Note) error {
-	parsed, err := composite.CodecFor(repo.Workspace(), note.ID).Decode(note.ID, note.Document.Raw, note.ModifiedAt)
+	parsed, err := composite.Decode(repo.Workspace(), note.ID, note.Document.Raw, note.ModifiedAt)
 	if err != nil {
 		return err
 	}
@@ -2737,7 +2737,7 @@ func parseCorpus(ctx context.Context, repo *workspace.FileNoteRepository) ([]dom
 		if err != nil {
 			return nil, err
 		}
-		parsedNote, err := composite.CodecFor(ws, note.ID).Decode(note.ID, note.Document.Raw, note.ModifiedAt)
+		parsedNote, err := composite.Decode(ws, note.ID, note.Document.Raw, note.ModifiedAt)
 		if err == nil {
 			parsed = append(parsed, parsedNote)
 		}

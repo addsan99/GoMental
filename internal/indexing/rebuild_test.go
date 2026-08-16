@@ -344,3 +344,34 @@ func TestRebuildComposite(t *testing.T) {
 		t.Fatalf("expected both members' notes in search, got %v", found)
 	}
 }
+
+// An ingest profile matches notes by path, and those paths are relative to the
+// member that owns the profile. Decoding under the composite's namespaced id
+// would silently stop matching every rule, which shows up as notes that "have no
+// frontmatter" even though they parse fine on their own.
+func TestRebuildCompositeAppliesMemberRelativeIngestProfiles(t *testing.T) {
+	base := t.TempDir()
+	profiled := filepath.Join(base, "profiled")
+	plain := filepath.Join(base, "plain")
+	root := filepath.Join(base, "all")
+	for _, dir := range []string{profiled, plain, root} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	writeNote(t, profiled, filepath.Join(".gomental", "mapping.yaml"), "version: 1\nrules:\n  - match: topics/**\n    defaults:\n      type: topic\n")
+	// No frontmatter: only the profile's default type makes this note parseable.
+	writeNote(t, profiled, "topics/alpha.md", "# Alpha\nBody.\n")
+	writeNote(t, plain, "beta.md", "---\ntype: concept\ntitle: Beta\n---\n\n# Beta\n")
+
+	if err := workspace.WriteCompositeConfig(root, []string{profiled, plain}); err != nil {
+		t.Fatal(err)
+	}
+	result, err := Rebuilder{WorkerCount: 2, Now: fixedNow}.Rebuild(context.Background(), root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.FailedNotes != 0 || result.ParsedNotes != 2 {
+		t.Fatalf("member ingest profile did not apply: %#v", result)
+	}
+}

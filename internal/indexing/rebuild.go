@@ -285,7 +285,7 @@ func (r Rebuilder) parseNotes(ctx context.Context, repo *workspace.FileNoteRepos
 					results <- parseResult{id: summary.ID, err: err}
 					continue
 				}
-				parsed, err := composite.CodecFor(ws, note.ID).Decode(note.ID, note.Document.Raw, note.ModifiedAt)
+				parsed, err := composite.Decode(ws, note.ID, note.Document.Raw, note.ModifiedAt)
 				if err != nil {
 					results <- parseResult{id: note.ID, err: err}
 					continue

@@ -8,14 +8,34 @@
 package composite
 
 import (
+	"time"
+
 	"GoMental/internal/domain"
 	"GoMental/internal/okf"
 	"GoMental/internal/workspace"
 )
 
-// CodecFor returns the codec that should decode a given note.
-func CodecFor(ws workspace.Workspace, id domain.NoteID) okf.Codec {
-	return okf.NewCodecWithMapping(ws.MappingForNoteID(id))
+// Decode parses a note under the ingest profile of the workspace that owns it.
+//
+// On a composite the note is decoded under its member-local ID, because an
+// ingest profile matches notes by path ("expertise/**") and those paths are
+// relative to the member, not to the composite. Decoding under the namespaced
+// ID would quietly stop matching every rule. The namespaced ID is restored
+// afterwards so callers only ever see composite IDs.
+func Decode(ws workspace.Workspace, id domain.NoteID, raw string, modifiedAt time.Time) (domain.ParsedOKFNote, error) {
+	if !ws.IsComposite() {
+		return okf.NewCodecWithMapping(ws.Mapping()).Decode(id, raw, modifiedAt)
+	}
+	member, localID, err := ws.MemberForNoteID(id)
+	if err != nil {
+		return okf.NewCodec().Decode(id, raw, modifiedAt)
+	}
+	parsed, err := okf.NewCodecWithMapping(member.Mapping()).Decode(localID, raw, modifiedAt)
+	if err != nil {
+		return domain.ParsedOKFNote{}, err
+	}
+	parsed.ID = id
+	return parsed, nil
 }
 
 // ResolveAll resolves wiki-links for a whole corpus in place.
