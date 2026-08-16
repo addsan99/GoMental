@@ -9,6 +9,7 @@ import (
 	"unicode"
 
 	"GoMental/internal/domain"
+	"GoMental/internal/ingest"
 
 	"gopkg.in/yaml.v3"
 )
@@ -22,17 +23,32 @@ var (
 	inlineMarkupPattern = regexp.MustCompile("[`*_>#]+")
 )
 
-type Parser struct{}
+// Parser reads notes under one workspace's ingest profile. The zero value uses
+// no profile, which is stock OKF behaviour.
+type Parser struct {
+	mapping ingest.Mapping
+}
 
+// NewParser returns a parser with no ingest profile.
 func NewParser() Parser {
 	return Parser{}
+}
+
+// NewParserWithMapping returns a parser bound to a workspace's ingest profile.
+func NewParserWithMapping(mapping ingest.Mapping) Parser {
+	return Parser{mapping: mapping}
+}
+
+// Mapping returns the ingest profile this parser reads under.
+func (p Parser) Mapping() ingest.Mapping {
+	return p.mapping
 }
 
 func (p Parser) ParseNote(id domain.NoteID, raw string, modifiedAt time.Time) (domain.ParsedOKFNote, error) {
 	frontmatter, body, err := splitFrontmatter(raw)
 	if err != nil {
 		decodeErr, ok := err.(domain.DecodeError)
-		if !ok || decodeErr.Code != "okf.missing_frontmatter" || !hasDefaultType(id) {
+		if !ok || decodeErr.Code != "okf.missing_frontmatter" || !p.hasDefaultType(id) {
 			return domain.ParsedOKFNote{}, err
 		}
 		// The workspace's ingest profile supplies a type for this path, so a file
@@ -43,13 +59,13 @@ func (p Parser) ParseNote(id domain.NoteID, raw string, modifiedAt time.Time) (d
 	if err != nil {
 		return domain.ParsedOKFNote{}, err
 	}
-	applyDefaults(id, &metadata)
-	applyMappedTags(id, &metadata)
+	p.applyDefaults(id, &metadata)
+	p.applyMappedTags(id, &metadata)
 	if strings.TrimSpace(metadata.Type) == "" {
 		return domain.ParsedOKFNote{}, domain.DecodeError{Code: "okf.missing_type", Message: "OKF concept document is missing required type"}
 	}
 	headings := extractHeadings(body)
-	links := rewriteTargets(append(extractLinks(id, body), mappedLinks(id, metadata)...))
+	links := p.rewriteTargets(append(extractLinks(id, body), p.mappedLinks(id, metadata)...))
 	title := chooseTitle(metadata.Title, headings, id)
 	return domain.ParsedOKFNote{
 		ID:         id,
@@ -60,7 +76,7 @@ func (p Parser) ParseNote(id domain.NoteID, raw string, modifiedAt time.Time) (d
 		PlainText:  plainText(body),
 		Headings:   headings,
 		Tags:       metadata.Tags,
-		Aliases:    mappedAliases(id, metadata),
+		Aliases:    p.mappedAliases(id, metadata),
 		Links:      links,
 		ModifiedAt: modifiedAt,
 	}, nil

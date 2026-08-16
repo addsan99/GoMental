@@ -23,7 +23,6 @@ import (
 	"GoMental/internal/graph"
 	"GoMental/internal/importers"
 	"GoMental/internal/indexing"
-	"GoMental/internal/ingest"
 	"GoMental/internal/okf"
 	"GoMental/internal/platform"
 	"GoMental/internal/search"
@@ -425,8 +424,6 @@ func (s *Service) OpenWorkspace(ctx context.Context, root string) (WorkspaceDTO,
 	if err != nil {
 		return WorkspaceDTO{}, appErr(ErrWorkspaceInaccessible, "Could not open workspace", err)
 	}
-	// Install the ingest profile before anything parses notes from this root.
-	okf.SetActiveMapping(ws.Mapping())
 	repo := workspace.NewFileNoteRepository(ws)
 	notes, err := repo.List(ctx)
 	if err != nil {
@@ -1065,7 +1062,7 @@ func (s *Service) SuggestLinks(ctx context.Context, input SuggestLinksRequest) (
 	if idx == nil {
 		return SuggestLinksResponse{}, appErr("suggestions.unavailable", "Suggestions are not ready", nil)
 	}
-	parsed, err := okf.NewCodec().Decode(id, input.Content, time.Time{})
+	parsed, err := okf.NewCodecWithMapping(ws.Mapping()).Decode(id, input.Content, time.Time{})
 	if err != nil {
 		return SuggestLinksResponse{}, appErr(ErrOKFDecodeFailed, "Could not decode draft", err)
 	}
@@ -1298,7 +1295,8 @@ func (s *Service) ExpandContext(ctx context.Context, id string, depth int) (Expa
 	if err != nil {
 		return ExpandContextDTO{}, appErr("notes.read_failed", "Could not read note", err)
 	}
-	focusParsed, err := okf.NewCodec().Decode(focus.ID, focus.Document.Raw, focus.ModifiedAt)
+	codec := okf.NewCodecWithMapping(repo.Workspace().Mapping())
+	focusParsed, err := codec.Decode(focus.ID, focus.Document.Raw, focus.ModifiedAt)
 	if err != nil {
 		return ExpandContextDTO{}, appErr(ErrOKFDecodeFailed, "Could not parse note", err)
 	}
@@ -1336,7 +1334,7 @@ func (s *Service) ExpandContext(ctx context.Context, id string, depth int) (Expa
 		}
 		excerpt := ""
 		title := n.Label // graph label falls back to the id; prefer the parsed title
-		if parsed, derr := okf.NewCodec().Decode(neighbor.ID, neighbor.Document.Raw, neighbor.ModifiedAt); derr == nil {
+		if parsed, derr := codec.Decode(neighbor.ID, neighbor.Document.Raw, neighbor.ModifiedAt); derr == nil {
 			excerpt = truncateRunes(parsed.PlainText, expandExcerptRunes)
 			if parsed.Title != "" {
 				title = parsed.Title
@@ -1358,7 +1356,7 @@ func readParsed(ctx context.Context, repo *workspace.FileNoteRepository, id stri
 	if err != nil {
 		return domain.ParsedOKFNote{}, appErr("notes.read_failed", "Could not read note", err)
 	}
-	parsed, err := okf.NewCodec().Decode(note.ID, note.Document.Raw, note.ModifiedAt)
+	parsed, err := okf.NewCodecWithMapping(repo.Workspace().Mapping()).Decode(note.ID, note.Document.Raw, note.ModifiedAt)
 	if err != nil {
 		return domain.ParsedOKFNote{}, appErr(ErrOKFDecodeFailed, "Could not parse note", err)
 	}
@@ -2526,7 +2524,6 @@ func (s *Service) closeStores() error {
 	s.corpus = nil
 	s.listFromSQLite = false
 	s.workspace = workspace.Workspace{}
-	okf.SetActiveMapping(ingest.Mapping{})
 	return errors.Join(errs...)
 }
 
@@ -2648,7 +2645,7 @@ func updateIncrementalProjections(ctx context.Context, repo *workspace.FileNoteR
 // filesystem walk. Soft-link inference is scheduled separately off the hot path.
 // This keeps save latency independent of corpus size.
 func updateOneProjectionFast(ctx context.Context, repo *workspace.FileNoteRepository, searchIndex *search.BleveIndex, graphStore *graph.SQLiteStore, corpus *liveCorpus, note domain.Note) error {
-	codec := okf.NewCodec()
+	codec := okf.NewCodecWithMapping(repo.Workspace().Mapping())
 	parsed, err := codec.Decode(note.ID, note.Document.Raw, note.ModifiedAt)
 	if err != nil {
 		return err
@@ -2693,7 +2690,7 @@ func resolverIDs(ctx context.Context, corpus *liveCorpus, repo *workspace.FileNo
 }
 
 func updateOneProjection(ctx context.Context, repo *workspace.FileNoteRepository, searchIndex *search.BleveIndex, graphStore *graph.SQLiteStore, live *liveCorpus, note domain.Note) error {
-	codec := okf.NewCodec()
+	codec := okf.NewCodecWithMapping(repo.Workspace().Mapping())
 	parsed, err := codec.Decode(note.ID, note.Document.Raw, note.ModifiedAt)
 	if err != nil {
 		return err
@@ -2736,7 +2733,7 @@ func parseCorpus(ctx context.Context, repo *workspace.FileNoteRepository) ([]dom
 	if err != nil {
 		return nil, err
 	}
-	codec := okf.NewCodec()
+	codec := okf.NewCodecWithMapping(repo.Workspace().Mapping())
 	var parsed []domain.ParsedOKFNote
 	for _, summary := range summaries {
 		note, err := repo.Read(ctx, summary.ID)

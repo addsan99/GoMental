@@ -94,7 +94,6 @@ func (r Rebuilder) RebuildWorkspaceSoftLinks(ctx context.Context, root string) e
 	if err != nil {
 		return err
 	}
-	okf.SetActiveMapping(ws.Mapping())
 	repo := workspace.NewFileNoteRepository(ws)
 	r.report(RebuildProgress{Stage: ProgressScanning, Message: "Scanning OKF notes"})
 	summaries, err := repo.List(ctx)
@@ -135,7 +134,6 @@ func (r Rebuilder) RebuildCore(ctx context.Context, root string) (RebuildResult,
 	if err != nil {
 		return RebuildResult{}, nil, err
 	}
-	okf.SetActiveMapping(ws.Mapping())
 	repo := workspace.NewFileNoteRepository(ws)
 	startedAt := r.Now().UTC()
 
@@ -285,7 +283,7 @@ func (r Rebuilder) parseNotes(ctx context.Context, repo *workspace.FileNoteRepos
 		workers = 1
 	}
 	var wg sync.WaitGroup
-	codec := okf.NewCodec()
+	codec := okf.NewCodecWithMapping(repo.Workspace().Mapping())
 	for i := 0; i < workers; i++ {
 		wg.Add(1)
 		go func() {

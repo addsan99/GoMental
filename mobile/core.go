@@ -513,7 +513,6 @@ func (c *Core) reload(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("mobile: open repository workspace: %w", err)
 	}
-	okf.SetActiveMapping(ws.Mapping())
 	repository := workspace.NewFileNoteRepository(ws)
 	summaries, err := repository.List(ctx)
 	if err != nil {
@@ -540,7 +539,7 @@ func (c *Core) reload(ctx context.Context) error {
 		safeSummaries = append(safeSummaries, summary)
 	}
 	summaries = safeSummaries
-	parser := okf.NewParser()
+	parser := okf.NewParserWithMapping(ws.Mapping())
 	parsed := make(map[domain.NoteID]domain.ParsedOKFNote, len(summaries))
 	ids := make([]domain.NoteID, 0, len(summaries))
 	for _, summary := range summaries {

@@ -3,49 +3,29 @@ package okf
 import (
 	"fmt"
 	"sort"
-	"sync/atomic"
 
 	"GoMental/internal/domain"
 	"GoMental/internal/ingest"
 )
 
-// activeMapping holds the ingest profile of the currently open workspace.
+// The ingest profile is carried by the Parser that is using it, not by process
+// state. A workspace's profile therefore travels with the parser that reads its
+// notes, which is what lets several workspaces — each with its own profile, or
+// none — be parsed at the same time inside one process.
 //
-// The parser is constructed ad hoc in many places (okf.NewCodec()), and the app
-// has exactly one workspace open at a time, so the profile is process-scoped
-// rather than threaded through every call site. It is nil until a workspace with
-// a mapping.yaml is opened, and every accessor below is a no-op while nil —
-// which is what keeps default behaviour unchanged.
-var activeMapping atomic.Pointer[ingest.Mapping]
-
-// SetActiveMapping installs the ingest profile for the open workspace. Passing a
-// zero mapping clears it.
-func SetActiveMapping(m ingest.Mapping) {
-	if m.IsZero() {
-		activeMapping.Store(nil)
-		return
-	}
-	activeMapping.Store(&m)
-}
-
-// ActiveMapping returns the installed ingest profile (zero value when none).
-func ActiveMapping() ingest.Mapping {
-	if m := activeMapping.Load(); m != nil {
-		return *m
-	}
-	return ingest.Mapping{}
-}
+// A zero mapping is the default and every accessor below is a no-op under it,
+// which is what keeps stock workspaces behaving exactly as they always have.
 
 // applyDefaults fills frontmatter fields the file left unset. Only fields that
 // are genuinely absent are touched, so a file always wins over the profile.
 // hasDefaultType reports whether the ingest profile supplies a `type` for this
 // note id, which is what makes a frontmatter-less file ingestible.
-func hasDefaultType(id domain.NoteID) bool {
-	return ActiveMapping().Defaults(string(id))["type"] != ""
+func (p Parser) hasDefaultType(id domain.NoteID) bool {
+	return p.mapping.Defaults(string(id))["type"] != ""
 }
 
-func applyDefaults(id domain.NoteID, metadata *domain.OKFMetadata) {
-	defaults := ActiveMapping().Defaults(string(id))
+func (p Parser) applyDefaults(id domain.NoteID, metadata *domain.OKFMetadata) {
+	defaults := p.mapping.Defaults(string(id))
 	if len(defaults) == 0 {
 		return
 	}
@@ -81,8 +61,8 @@ func applyDefaults(id domain.NoteID, metadata *domain.OKFMetadata) {
 // mappedLinks turns declared frontmatter reference fields into parsed links.
 // They are ordinary links from that point on: the existing resolver, graph
 // builder and backlink queries need no knowledge of where they came from.
-func mappedLinks(id domain.NoteID, metadata domain.OKFMetadata) []domain.ParsedLink {
-	fields := ActiveMapping().LinkFields(string(id))
+func (p Parser) mappedLinks(id domain.NoteID, metadata domain.OKFMetadata) []domain.ParsedLink {
+	fields := p.mapping.LinkFields(string(id))
 	if len(fields) == 0 || len(metadata.Unknown) == 0 {
 		return nil
 	}
@@ -113,8 +93,8 @@ func mappedLinks(id domain.NoteID, metadata domain.OKFMetadata) []domain.ParsedL
 // go through the same parseTags normalization as authored tags, so from here on
 // nothing can tell them apart: the tag facet, graph hubs, filters and search all
 // treat them as ordinary tags.
-func applyMappedTags(id domain.NoteID, metadata *domain.OKFMetadata) {
-	fields := ActiveMapping().TagFields(string(id))
+func (p Parser) applyMappedTags(id domain.NoteID, metadata *domain.OKFMetadata) {
+	fields := p.mapping.TagFields(string(id))
 	if len(fields) == 0 || len(metadata.Unknown) == 0 {
 		return
 	}
@@ -140,8 +120,8 @@ func applyMappedTags(id domain.NoteID, metadata *domain.OKFMetadata) {
 
 // rewriteTargets applies the profile's declared link-prefix strips. Links that
 // match nothing are returned untouched.
-func rewriteTargets(links []domain.ParsedLink) []domain.ParsedLink {
-	mapping := ActiveMapping()
+func (p Parser) rewriteTargets(links []domain.ParsedLink) []domain.ParsedLink {
+	mapping := p.mapping
 	if len(mapping.StripLinkPrefixes) == 0 {
 		return links
 	}
@@ -153,8 +133,8 @@ func rewriteTargets(links []domain.ParsedLink) []domain.ParsedLink {
 
 // mappedAliases collects the values of declared alias fields so they land in the
 // search index's existing (and already boosted) aliases field.
-func mappedAliases(id domain.NoteID, metadata domain.OKFMetadata) []string {
-	fields := ActiveMapping().AliasFields(string(id))
+func (p Parser) mappedAliases(id domain.NoteID, metadata domain.OKFMetadata) []string {
+	fields := p.mapping.AliasFields(string(id))
 	if len(fields) == 0 || len(metadata.Unknown) == 0 {
 		return nil
 	}
