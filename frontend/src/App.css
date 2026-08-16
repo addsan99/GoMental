@@ -918,6 +918,8 @@ body.gm-resizing * { cursor: col-resize !important; }
 .gm-list { display: flex; flex-direction: column; gap: 8px; margin: 6px 0 24px; }
 .gm-list-item { display: flex; gap: 11px; align-items: baseline; }
 .gm-list-dot { width: 6px; height: 6px; border-radius: 9999px; background: var(--accent); flex: none; transform: translateY(-3px); }
+/* Nested bullets are hollow, so depth reads even when the indent is subtle. */
+.gm-list-dot-nested { background: transparent; border: 1.5px solid var(--accent); }
 .gm-list-text { font: 400 17px/1.6 var(--font-read); color: var(--text); }
 
 .gm-callout {

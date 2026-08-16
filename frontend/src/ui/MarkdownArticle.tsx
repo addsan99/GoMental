@@ -24,7 +24,7 @@ type Block =
   | {t: 'p'; text: string}
   | {t: 'table'; head: string[]; rows: string[][]}
   | {t: 'steps'; items: {text: string; subs: string[]}[]}
-  | {t: 'list'; items: string[]}
+  | {t: 'list'; items: {text: string; depth: number}[]}
   | {t: 'callout'; title: string; text: string}
   | {t: 'code'; text: string; lang: string}
   | {t: 'image'; alt: string; src: string};
@@ -147,11 +147,27 @@ export function parseArticle(rawContent: string, fallbackTitle: string): Article
       continue;
     }
 
-    // Unordered list.
+    // Unordered list. Indentation carries the nesting, so it is measured
+    // before the line is trimmed.
     if (/^[-*+]\s+/.test(trimmed)) {
-      const items: string[] = [];
+      const items: {text: string; depth: number}[] = [];
+      // Indent widths seen so far, one per open level. Comparing against the
+      // stack rather than dividing by a fixed step means 2-space, 4-space and
+      // tab-indented notes all nest, and a document that mixes them still
+      // nests by relative depth instead of by how wide the indent happens to be.
+      const openIndents: number[] = [];
       while (i < lines.length && /^[-*+]\s+/.test(lines[i].trim())) {
-        items.push(lines[i].trim().replace(/^[-*+]\s+/, ''));
+        const indent = indentWidth(lines[i]);
+        while (openIndents.length > 0 && indent < openIndents[openIndents.length - 1]) {
+          openIndents.pop();
+        }
+        if (openIndents.length === 0 || indent > openIndents[openIndents.length - 1]) {
+          openIndents.push(indent);
+        }
+        items.push({
+          text: lines[i].trim().replace(/^[-*+]\s+/, ''),
+          depth: Math.min(openIndents.length - 1, MAX_LIST_DEPTH),
+        });
         i += 1;
       }
       blocks.push({t: 'list', items});
@@ -191,6 +207,25 @@ export function parseArticle(rawContent: string, fallbackTitle: string): Article
     outline,
     wordCount: countWords(lead, blocks),
   };
+}
+
+// Deeper nesting than this indents so far that the text has nowhere left to go.
+const MAX_LIST_DEPTH = 5;
+
+// Width of a line's leading whitespace, with tabs counted as a 4-space stop so
+// tab- and space-indented lists nest consistently.
+function indentWidth(line: string): number {
+  let width = 0;
+  for (const ch of line) {
+    if (ch === ' ') {
+      width += 1;
+    } else if (ch === '\t') {
+      width += 4 - (width % 4);
+    } else {
+      break;
+    }
+  }
+  return width;
 }
 
 function isStructural(line: string): boolean {
@@ -280,14 +315,14 @@ function countWords(lead: string, blocks: Block[]): number {
         item.subs.forEach(add);
       });
     } else if (block.t === 'list') {
-      block.items.forEach(add);
+      block.items.forEach((item) => add(item.text));
     }
   }
   return n;
 }
 
 function plainInlineText(text: string): string {
-  return text
+  return decodeEntities(text)
     .replace(/!\[([^\]]*)\]\(([^)]+)\)/g, '$1')
     .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '$1')
     .replace(/\[\[([^\]|]+)(?:\|([^\]]+))?\]\]/g, (_full, target: string, label?: string) => label || target)
@@ -295,6 +330,62 @@ function plainInlineText(text: string): string {
     .replace(/\*([^*\n]+?)\*/g, '$1')
     .replace(/`([^`]+?)`/g, '$1')
     .trim();
+}
+
+// ---- HTML entities -------------------------------------------------------
+
+// The entities worth knowing by name. Markdown exporters reach for these
+// constantly — &#x20; in particular is how several of them preserve a trailing
+// space that Markdown would otherwise strip — and left undecoded they show up
+// verbatim in the middle of a sentence.
+const NAMED_ENTITIES: Record<string, string> = {
+  amp: '&', lt: '<', gt: '>', quot: '"', apos: "'",
+  nbsp: '\u00a0', ensp: '\u2002', emsp: '\u2003', thinsp: '\u2009', shy: '\u00ad',
+  hellip: '…', mdash: '—', ndash: '–', bull: '•', middot: '·', dagger: '†',
+  ldquo: '“', rdquo: '”', lsquo: '‘', rsquo: '’', laquo: '«', raquo: '»',
+  copy: '©', reg: '®', trade: '™', sect: '§', para: '¶', deg: '°',
+  euro: '€', pound: '£', yen: '¥', cent: '¢',
+  times: '×', divide: '÷', plusmn: '±', frac12: '½', frac14: '¼', frac34: '¾',
+  ne: '≠', le: '≤', ge: '≥', infin: '∞',
+  larr: '←', rarr: '→', harr: '↔', darr: '↓', uarr: '↑',
+};
+
+const ENTITY_PATTERN = /&(?:#[xX]([0-9a-fA-F]+)|#(\d+)|([a-zA-Z][a-zA-Z0-9]*));/g;
+
+// decodeEntities resolves HTML entities in already-parsed inline text.
+//
+// It runs *after* the Markdown inline scan, so a decoded character can never
+// turn into syntax — &#42; stays a literal asterisk rather than opening
+// emphasis. Anything it cannot resolve is left exactly as written, on the
+// grounds that a stray "&" in prose is far more likely than a typo'd entity.
+// Never call it on code spans or code blocks, where the text is meant literally.
+export function decodeEntities(text: string): string {
+  if (!text.includes('&')) {
+    return text;
+  }
+  return text.replace(ENTITY_PATTERN, (whole, hex?: string, dec?: string, name?: string) => {
+    if (name != null) {
+      const known = NAMED_ENTITIES[name] ?? NAMED_ENTITIES[name.toLowerCase()];
+      return known ?? whole;
+    }
+    const code = parseInt(hex ?? dec ?? '', hex != null ? 16 : 10);
+    if (!Number.isFinite(code) || code <= 0 || code > 0x10ffff) {
+      return whole;
+    }
+    // Lone surrogates cannot stand on their own, and control characters would
+    // be invisible damage rather than a useful character.
+    if (code >= 0xd800 && code <= 0xdfff) {
+      return whole;
+    }
+    if (code < 0x20 && code !== 0x09 && code !== 0x0a) {
+      return whole;
+    }
+    try {
+      return String.fromCodePoint(code);
+    } catch {
+      return whole;
+    }
+  });
 }
 
 // ---- Inline rendering ----------------------------------------------------
@@ -314,15 +405,15 @@ function renderInline(text: string, onNavigate: (id: string) => void, keyPrefix:
   let match: RegExpExecArray | null;
   while ((match = re.exec(text)) !== null) {
     if (match.index > last) {
-      out.push(<Fragment key={`${keyPrefix}-t${key++}`}>{text.slice(last, match.index)}</Fragment>);
+      out.push(<Fragment key={`${keyPrefix}-t${key++}`}>{decodeEntities(text.slice(last, match.index))}</Fragment>);
     }
     if (match[1] != null) {
-      out.push(<strong key={`${keyPrefix}-b${key++}`}>{match[1]}</strong>);
+      out.push(<strong key={`${keyPrefix}-b${key++}`}>{decodeEntities(match[1])}</strong>);
     } else if (match[2] != null) {
       out.push(<code key={`${keyPrefix}-c${key++}`} className="gm-inline-code">{match[2]}</code>);
     } else if (match[3] != null) {
       const target = match[3].trim();
-      const label = (match[4] || match[3]).trim();
+      const label = decodeEntities((match[4] || match[3]).trim());
       out.push(
         <a
           key={`${keyPrefix}-w${key++}`}
@@ -338,7 +429,7 @@ function renderInline(text: string, onNavigate: (id: string) => void, keyPrefix:
       );
     } else if (match[5] != null && match[6] != null) {
       const href = match[6].trim();
-      const label = match[5].trim();
+      const label = decodeEntities(match[5].trim());
       const isSafeExternal = /^(?:https?:|mailto:)/i.test(href) || href.startsWith('//') || href.startsWith('#');
       const hasScheme = /^[a-z][a-z0-9+.-]*:/i.test(href);
       if (isSafeExternal) {
@@ -365,12 +456,12 @@ function renderInline(text: string, onNavigate: (id: string) => void, keyPrefix:
         out.push(<Fragment key={`${keyPrefix}-l${key++}`}>{label}</Fragment>);
       }
     } else if (match[7] != null) {
-      out.push(<em key={`${keyPrefix}-i${key++}`}>{match[7]}</em>);
+      out.push(<em key={`${keyPrefix}-i${key++}`}>{decodeEntities(match[7])}</em>);
     }
     last = re.lastIndex;
   }
   if (last < text.length) {
-    out.push(<Fragment key={`${keyPrefix}-t${key++}`}>{text.slice(last)}</Fragment>);
+    out.push(<Fragment key={`${keyPrefix}-t${key++}`}>{decodeEntities(text.slice(last))}</Fragment>);
   }
   return out;
 }
@@ -584,9 +675,13 @@ export function MarkdownArticle({model, tags, noteID, onNavigate, theme = 'light
             return (
               <div className="gm-list" key={key}>
                 {block.items.map((item, li) => (
-                  <div className="gm-list-item" key={li}>
-                    <span className="gm-list-dot" />
-                    <span className="gm-list-text">{renderInline(item, onNavigate, `${key}-${li}`)}</span>
+                  <div
+                    className="gm-list-item"
+                    key={li}
+                    style={item.depth > 0 ? {marginLeft: `${item.depth * 26}px`} : undefined}
+                  >
+                    <span className={`gm-list-dot${item.depth > 0 ? ' gm-list-dot-nested' : ''}`} />
+                    <span className="gm-list-text">{renderInline(item.text, onNavigate, `${key}-${li}`)}</span>
                   </div>
                 ))}
               </div>
