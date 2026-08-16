@@ -69,10 +69,11 @@ import {
   SuggestLinks,
   SetNoteFavorite,
   SelectWorkspaceDirectory,
+  WorkspaceMembers,
   onEvent,
 } from './transport';
 import type {application} from '../wailsjs/go/models';
-import type {AppInfoWithMode, GoMentalComposite, GoMentalSettings, GoMentalWorkspaceSettings, LinkSuggestion, NoteDTOWithVersion, NoteType} from './transport/types';
+import type {AppInfoWithMode, GoMentalComposite, GoMentalSettings, GoMentalWorkspaceMember, GoMentalWorkspaceSettings, LinkSuggestion, NoteDTOWithVersion, NoteType} from './transport/types';
 import {CSS_VARIABLE_NAMES, cssVariablesForTheme, loadVSCodeTheme} from './themes/vscode';
 import {themeOption, vscodeThemeOptions} from './themes/catalog';
 
@@ -212,6 +213,10 @@ function App() {
   const [noteTypes, setNoteTypes] = useState<NoteType[]>([]);
   const [newNoteTitle, setNewNoteTitle] = useState('');
   const [newNoteID, setNewNoteID] = useState('');
+  // Composite workspaces span several member workspaces, so a new note needs a
+  // destination. Empty for an ordinary workspace, which owns its own files.
+  const [workspaceMembers, setWorkspaceMembers] = useState<GoMentalWorkspaceMember[]>([]);
+  const [newNoteMember, setNewNoteMember] = useState('');
   const [importOpen, setImportOpen] = useState(false);
   const [importURL, setImportURL] = useState('');
   const [searchText, setSearchText] = useState('');
@@ -537,6 +542,32 @@ function App() {
     }
   }, [loadNotes, projectionActive, selectedID, showToast]);
 
+  useEffect(() => {
+    let cancelled = false;
+    if (!workspace) {
+      setWorkspaceMembers([]);
+      setNewNoteMember('');
+      return;
+    }
+    void WorkspaceMembers()
+      .then((members) => {
+        if (cancelled) {
+          return;
+        }
+        setWorkspaceMembers(members || []);
+        setNewNoteMember((current) => (members || []).some((member) => member.prefix === current)
+          ? current
+          : (members || [])[0]?.prefix || '');
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setWorkspaceMembers([]);
+          setNewNoteMember('');
+        }
+      });
+    return () => { cancelled = true; };
+  }, [workspace?.root]);
+
   const createNote = useCallback(async () => {
     if (!workspace || busy || info.readOnly || workspaceIsReadOnly(settings, workspace.root)) {
       return;
@@ -547,8 +578,12 @@ function App() {
       setError('Enter a note title or note ID.');
       return;
     }
-    if (notes.some((note) => note.id.toLocaleLowerCase() === id.toLocaleLowerCase())) {
-      setError(`A note already exists at ${id}.`);
+    // On a composite the note lands inside a member, so the collision check has
+    // to be against the id the note will actually have, not the bare one typed.
+    const member = workspaceMembers.some((entry) => entry.prefix === newNoteMember) ? newNoteMember : '';
+    const qualifiedID = member ? `${member}/${id}` : id;
+    if (notes.some((note) => note.id.toLocaleLowerCase() === qualifiedID.toLocaleLowerCase())) {
+      setError(`A note already exists at ${qualifiedID}.`);
       return;
     }
     setBusy('Creating note');
@@ -560,7 +595,7 @@ function App() {
         return;
       }
       const content = renderNoteTypeStarterContent(noteType, title || basename(id), id);
-      const saved = await SaveNote({id, content});
+      const saved = await SaveNote({id, content, member});
       pendingEditNoteRef.current = saved.id;
       setNewNoteOpen(false);
       setNewNoteTemplate(noteType.id);
@@ -583,7 +618,7 @@ function App() {
     } finally {
       setBusy('');
     }
-  }, [busy, info.readOnly, loadNotes, newNoteID, newNoteTemplate, newNoteTitle, noteTypes, notes, settings, showToast, theme, workspace]);
+  }, [busy, info.readOnly, loadNotes, newNoteID, newNoteMember, newNoteTemplate, newNoteTitle, noteTypes, notes, settings, showToast, theme, workspace, workspaceMembers]);
 
   const importFromURL = useCallback(async () => {
     if (!workspace || busy || info.readOnly || workspaceIsReadOnly(settings, workspace.root)) {
@@ -597,7 +632,8 @@ function App() {
     setBusy('Importing URL');
     setError('');
     try {
-      const saved = await ImportURL({url});
+      const member = workspaceMembers.some((entry) => entry.prefix === newNoteMember) ? newNoteMember : '';
+      const saved = await ImportURL({url, member});
       setImportOpen(false);
       setImportURL('');
       setSelectedNote(saved);
@@ -617,7 +653,7 @@ function App() {
     } finally {
       setBusy('');
     }
-  }, [busy, importURL, info.readOnly, loadNotes, settings, showToast, theme, workspace]);
+  }, [busy, importURL, info.readOnly, loadNotes, newNoteMember, settings, showToast, theme, workspace, workspaceMembers]);
 
   useEffect(() => {
     const offProgress = onEvent('index:progress', (payload: RebuildProgress) => {
@@ -1890,6 +1926,16 @@ function App() {
                   <span>Note ID</span>
                   <input value={newNoteID} onChange={(event) => setNewNoteID(event.target.value)} placeholder="folder/note-name" />
                 </label>
+                {workspaceMembers.length > 0 && (
+                  <label>
+                    <span>Workspace</span>
+                    <select value={newNoteMember} onChange={(event) => setNewNoteMember(event.target.value)}>
+                      {workspaceMembers.map((member) => (
+                        <option key={member.prefix} value={member.prefix} title={member.root}>{member.name}</option>
+                      ))}
+                    </select>
+                  </label>
+                )}
                 <div className="gm-inline-form-actions">
                   <button type="button" className="gm-btn gm-btn-ghost gm-btn-sm" onClick={() => setNewNoteOpen(false)}>Cancel</button>
                   <button type="submit" className="gm-btn gm-btn-primary gm-btn-sm" disabled={interactionBusy}>Create</button>
@@ -1902,6 +1948,16 @@ function App() {
                   <span>URL</span>
                   <input value={importURL} onChange={(event) => setImportURL(event.target.value)} placeholder="https://example.com/recipe" autoFocus />
                 </label>
+                {workspaceMembers.length > 0 && (
+                  <label>
+                    <span>Workspace</span>
+                    <select value={newNoteMember} onChange={(event) => setNewNoteMember(event.target.value)}>
+                      {workspaceMembers.map((member) => (
+                        <option key={member.prefix} value={member.prefix} title={member.root}>{member.name}</option>
+                      ))}
+                    </select>
+                  </label>
+                )}
                 <div className="gm-inline-form-actions">
                   <button type="button" className="gm-btn gm-btn-ghost gm-btn-sm" onClick={() => setImportOpen(false)}>Cancel</button>
                   <button type="submit" className="gm-btn gm-btn-primary gm-btn-sm" disabled={interactionBusy}>Import</button>

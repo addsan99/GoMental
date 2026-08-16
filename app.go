@@ -630,6 +630,11 @@ func (a *App) Composite() (application.CompositeDTO, error) {
 	return a.service().Composite(a.context())
 }
 
+// WorkspaceMembers lists the member workspaces a new note can be written to.
+func (a *App) WorkspaceMembers() ([]application.WorkspaceMemberDTO, error) {
+	return a.service().WorkspaceMembers(a.context())
+}
+
 // SaveComposite redefines which workspaces the composite spans.
 func (a *App) SaveComposite(memberRoots []string) (application.CompositeDTO, error) {
 	return a.service().SaveComposite(a.context(), memberRoots)

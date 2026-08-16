@@ -288,8 +288,28 @@ func (m Member) NamespaceNoteID(id domain.NoteID) domain.NoteID {
 // member, which is the one the composite lists first and so the one a user is
 // most likely to mean by "here".
 func (w Workspace) QualifyNewNoteID(id domain.NoteID) (domain.NoteID, error) {
+	return w.QualifyNewNoteIDIn(id, "")
+}
+
+// QualifyNewNoteIDIn is QualifyNewNoteID with an explicit destination member.
+//
+// A named member always wins over the ID's own leading segment. Without that
+// rule "storm/ssh-keys" would be read as "the note ssh-keys in the member
+// storm" even when the user had just picked a different member from the
+// destination list, and a folder that happens to share a member's name would
+// quietly redirect the note. An explicit choice is never a guess, so it is the
+// one thing here that should not be second-guessed.
+func (w Workspace) QualifyNewNoteIDIn(id domain.NoteID, prefix string) (domain.NoteID, error) {
 	if !w.IsComposite() {
 		return id, nil
+	}
+	if prefix = strings.TrimSpace(prefix); prefix != "" {
+		for _, member := range w.members {
+			if member.Prefix == prefix {
+				return member.NamespaceNoteID(id), nil
+			}
+		}
+		return "", fmt.Errorf("%w: %s", ErrUnknownNotePrefix, prefix)
 	}
 	if _, _, err := w.MemberForNoteID(id); err == nil {
 		return id, nil
@@ -298,4 +318,24 @@ func (w Workspace) QualifyNewNoteID(id domain.NoteID) (domain.NoteID, error) {
 		return "", fmt.Errorf("%w: composite has no available members", ErrUnknownNotePrefix)
 	}
 	return w.members[0].NamespaceNoteID(id), nil
+}
+
+// QualifyRenamedNoteID places the target of a rename. A new ID that already
+// names a member is honoured, so a note can be moved between members
+// deliberately; anything else stays in the member the note is already in.
+// Anchoring to the current member matters because the alternative — falling
+// back to the first member — would turn an ordinary rename into a silent move
+// to another workspace.
+func (w Workspace) QualifyRenamedNoteID(oldID, newID domain.NoteID) (domain.NoteID, error) {
+	if !w.IsComposite() {
+		return newID, nil
+	}
+	if _, _, err := w.MemberForNoteID(newID); err == nil {
+		return newID, nil
+	}
+	member, _, err := w.MemberForNoteID(oldID)
+	if err != nil {
+		return "", err
+	}
+	return member.NamespaceNoteID(newID), nil
 }

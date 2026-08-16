@@ -70,8 +70,15 @@ func (s *Server) buildTools() []Tool {
 				"id":      strProp("Desired note id (may contain '/')."),
 				"content": strProp("Full OKF/Markdown content."),
 				"mode":    map[string]any{"type": "string", "enum": []string{"create", "upsert", "unique"}, "description": "Collision behavior."},
+				"member":  strProp("For a composite workspace, the member to create the note in (see list_workspace_members). Defaults to the first member."),
 			}, "id", "content"),
 			Handler: s.createNote,
+		},
+		{
+			Name:        "list_workspace_members",
+			Description: "List the member workspaces a new note can be created in. Returns an empty list for an ordinary workspace, which has only one place a note can go.",
+			InputSchema: obj(map[string]any{}),
+			Handler:     s.listWorkspaceMembers,
 		},
 		{
 			Name:        "edit_note",
@@ -228,16 +235,25 @@ func (s *Server) listNotes(ctx context.Context, raw json.RawMessage) (string, er
 	return jsonString(map[string]any{"notes": filtered, "count": len(filtered)}), nil
 }
 
+func (s *Server) listWorkspaceMembers(ctx context.Context, _ json.RawMessage) (string, error) {
+	members, err := s.service.WorkspaceMembers(ctx)
+	if err != nil {
+		return "", err
+	}
+	return jsonString(map[string]any{"members": members, "count": len(members)}), nil
+}
+
 func (s *Server) createNote(ctx context.Context, raw json.RawMessage) (string, error) {
 	var args struct {
 		ID      string `json:"id"`
 		Content string `json:"content"`
 		Mode    string `json:"mode"`
+		Member  string `json:"member"`
 	}
 	if err := json.Unmarshal(raw, &args); err != nil {
 		return "", err
 	}
-	note, err := s.service.CreateNote(ctx, application.CreateNoteRequest{ID: args.ID, Content: args.Content, Mode: args.Mode})
+	note, err := s.service.CreateNote(ctx, application.CreateNoteRequest{ID: args.ID, Content: args.Content, Mode: args.Mode, Member: args.Member})
 	if err != nil {
 		return "", err
 	}

@@ -2,8 +2,10 @@ package workspace
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -197,5 +199,52 @@ func TestCompositeSkipsMembersThatAreGone(t *testing.T) {
 	}
 	if len(notes) != 2 {
 		t.Fatalf("expected alpha's 2 notes, got %d", len(notes))
+	}
+}
+
+func TestCompositeHonoursAnExplicitDestinationMember(t *testing.T) {
+	ws, _, betaRoot := twoMemberComposite(t)
+
+	chosen, err := ws.QualifyNewNoteIDIn("brand-new", "beta")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if chosen != "beta/brand-new" {
+		t.Fatalf("expected the chosen member, got %q", chosen)
+	}
+	path, err := ws.PathForNoteID(chosen)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(path, betaRoot) {
+		t.Fatalf("note landed at %q, expected it inside %q", path, betaRoot)
+	}
+
+	// A folder that happens to share another member's name must not steal the
+	// note away from the member the user actually picked.
+	nested, err := ws.QualifyNewNoteIDIn("alpha/brand-new", "beta")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if nested != "beta/alpha/brand-new" {
+		t.Fatalf("expected the explicit member to win, got %q", nested)
+	}
+
+	if _, err := ws.QualifyNewNoteIDIn("brand-new", "gamma"); !errors.Is(err, ErrUnknownNotePrefix) {
+		t.Fatalf("expected an unknown-prefix error for a member that is not there, got %v", err)
+	}
+}
+
+func TestOrdinaryWorkspaceIgnoresADestinationMember(t *testing.T) {
+	ws, err := Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	id, err := ws.QualifyNewNoteIDIn("brand-new", "beta")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if id != "brand-new" {
+		t.Fatalf("expected the id untouched on an ordinary workspace, got %q", id)
 	}
 }

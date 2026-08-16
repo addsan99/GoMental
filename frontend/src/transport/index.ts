@@ -13,6 +13,7 @@ const impl = useHttp ? http : wails
 export const Backlinks = impl.Backlinks
 export const Composite = impl.Composite
 export const SaveComposite = impl.SaveComposite
+export const WorkspaceMembers = impl.WorkspaceMembers
 export const DeleteNote = impl.DeleteNote
 export const DeleteNoteType = impl.DeleteNoteType
 export const FullGraph = impl.FullGraph

@@ -484,3 +484,13 @@ func (s *Server) handleDeleteNoteType(w http.ResponseWriter, r *http.Request) {
 	}
 	w.WriteHeader(http.StatusNoContent)
 }
+
+// GET /api/workspace/members
+func (s *Server) handleWorkspaceMembers(w http.ResponseWriter, r *http.Request) {
+	items, err := s.service().WorkspaceMembers(r.Context())
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, items)
+}

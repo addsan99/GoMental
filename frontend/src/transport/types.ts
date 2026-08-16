@@ -68,6 +68,14 @@ export type NoteDTOWithVersion = application.NoteDTO & {
 export type SaveNoteRequestWithVersion = application.SaveNoteRequest & {
   baseVersion?: string
   force?: boolean
+  // Which member of a composite workspace a *new* note should be written to.
+  // Ignored when saving a note that already lives somewhere.
+  member?: string
+}
+
+// ImportURLRequest plus the composite destination member.
+export type ImportURLRequestWithMember = application.ImportURLRequest & {
+  member?: string
 }
 
 export type SetNoteFavoriteRequest = {
@@ -154,6 +162,14 @@ export interface GoMentalCompositeMember {
   name: string
   prefix: string
   missing: boolean
+}
+
+// A destination a new note can be written to. Empty on an ordinary workspace,
+// which is how the UI knows not to ask the question at all.
+export interface GoMentalWorkspaceMember {
+  prefix: string
+  root: string
+  name: string
 }
 
 export interface GoMentalComposite {

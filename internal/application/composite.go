@@ -94,3 +94,36 @@ func compositeDTO(root string, memberRoots []string) CompositeDTO {
 	}
 	return CompositeDTO{Root: root, Configured: len(members) > 0, Members: members}
 }
+
+// WorkspaceMemberDTO is a destination a new note can be written to.
+type WorkspaceMemberDTO struct {
+	Prefix string `json:"prefix"`
+	Root   string `json:"root"`
+	Name   string `json:"name"`
+}
+
+// WorkspaceMembers lists the members of the workspace that is currently open,
+// in the order a destination picker should offer them. An ordinary workspace
+// has none, which is the signal the UI uses to leave the picker out entirely
+// rather than offer a choice of one.
+//
+// This is deliberately not Composite(): that reports the composite the app is
+// configured to build, whereas this reports what the open workspace actually
+// resolved to, with unavailable members already dropped. Only the latter can
+// honestly answer "where can this note go right now?".
+func (s *Service) WorkspaceMembers(ctx context.Context) ([]WorkspaceMemberDTO, error) {
+	ws, err := s.workspaceSnapshot()
+	if err != nil {
+		return nil, err
+	}
+	members := ws.Members()
+	out := make([]WorkspaceMemberDTO, 0, len(members))
+	for _, member := range members {
+		out = append(out, WorkspaceMemberDTO{
+			Prefix: member.Prefix,
+			Root:   member.Root(),
+			Name:   filepath.Base(member.Root()),
+		})
+	}
+	return out, nil
+}

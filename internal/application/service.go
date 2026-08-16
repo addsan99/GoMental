@@ -94,6 +94,10 @@ type SaveNoteRequest struct {
 	BaseVersion string `json:"baseVersion,omitempty"`
 	// Force bypasses the version check even when BaseVersion is set.
 	Force bool `json:"force,omitempty"`
+	// Member names the composite member a *new* note should be written to, by
+	// prefix. Ignored for an ID that already resolves to a member, and on an
+	// ordinary workspace.
+	Member string `json:"member,omitempty"`
 }
 
 type MoveNoteRequest struct {
@@ -103,6 +107,9 @@ type MoveNoteRequest struct {
 
 type ImportURLRequest struct {
 	URL string `json:"url"`
+	// Member names the composite member to import into, by prefix. Empty means
+	// the composite's first member.
+	Member string `json:"member,omitempty"`
 }
 
 // CreateNoteRequest drives the agent-ergonomic create endpoint.
@@ -112,6 +119,9 @@ type CreateNoteRequest struct {
 	// Mode selects collision behavior: "create" (default; fail if the id exists),
 	// "upsert" (write regardless), or "unique" (auto-suffix the id to a free one).
 	Mode string `json:"mode"`
+	// Member names the composite member to create the note in, by prefix. Empty
+	// means the composite's first member.
+	Member string `json:"member,omitempty"`
 }
 
 type SaveNoteAssetRequest struct {
@@ -634,6 +644,14 @@ func (s *Service) SaveNote(ctx context.Context, req SaveNoteRequest) (NoteDTO, e
 	if err != nil {
 		return NoteDTO{}, appErr("notes.invalid_id", "Invalid note id", err)
 	}
+	// A composite owns no files of its own, so a bare ID has nowhere to land
+	// until it names a member. Saves of existing notes already carry a
+	// namespaced ID and pass through untouched; this is what lets the editor
+	// create a note in a composite at all.
+	noteID, err = ws.QualifyNewNoteIDIn(noteID, req.Member)
+	if err != nil {
+		return NoteDTO{}, appErr("notes.invalid_id", "Could not place the note in a member workspace", err)
+	}
 	// Serialize concurrent writes to the same note; different notes stay parallel.
 	unlock := s.lockNote(noteID)
 	defer unlock()
@@ -749,7 +767,7 @@ func (s *Service) CreateNote(ctx context.Context, req CreateNoteRequest) (NoteDT
 	if err != nil {
 		return NoteDTO{}, appErr("notes.invalid_id", "Invalid note id", err)
 	}
-	noteID, err = ws.QualifyNewNoteID(noteID)
+	noteID, err = ws.QualifyNewNoteIDIn(noteID, req.Member)
 	if err != nil {
 		return NoteDTO{}, appErr("notes.invalid_id", "Could not place the new note in a member workspace", err)
 	}
@@ -795,6 +813,10 @@ func (s *Service) CreateNote(ctx context.Context, req CreateNoteRequest) (NoteDT
 }
 
 func (s *Service) ImportURL(ctx context.Context, req ImportURLRequest) (NoteDTO, error) {
+	ws, err := s.workspaceSnapshot()
+	if err != nil {
+		return NoteDTO{}, err
+	}
 	repo, searchIndex, graphStore, err := s.sessionSnapshot()
 	if err != nil {
 		return NoteDTO{}, err
@@ -817,6 +839,12 @@ func (s *Service) ImportURL(ctx context.Context, req ImportURLRequest) (NoteDTO,
 			return NoteDTO{}, appErr("import.unsupported", "No importer could handle this URL", err)
 		}
 		return NoteDTO{}, appErr("import.failed", "Could not import URL", err)
+	}
+	// The importer names the note after its source, with no idea that the
+	// workspace might span several roots.
+	result.Document.ID, err = ws.QualifyNewNoteIDIn(result.Document.ID, req.Member)
+	if err != nil {
+		return NoteDTO{}, appErr("import.note_id_failed", "Could not place the imported note in a member workspace", err)
 	}
 	result.Document.ID, err = uniqueImportedNoteID(ctx, repo, result.Document.ID)
 	if err != nil {
@@ -868,7 +896,11 @@ func (s *Service) SaveNoteAsset(ctx context.Context, req SaveNoteAssetRequest) (
 		return SaveNoteAssetResponse{}, appErr("asset.unsupported_type", "Unsupported image type", fmt.Errorf("%s", req.MIMEType))
 	}
 	fileName := uniqueAssetFileName(req.FileName, mimeType)
-	assetDir := filepath.Join(ws.Root(), "assets", filepath.FromSlash(string(noteID)))
+	assetRoot, assetKey, err := noteAssetRoot(ws, noteID)
+	if err != nil {
+		return SaveNoteAssetResponse{}, appErr("asset.note_path_failed", "Could not resolve the workspace that owns this note", err)
+	}
+	assetDir := filepath.Join(assetRoot, "assets", filepath.FromSlash(string(assetKey)))
 	if err := os.MkdirAll(assetDir, 0o755); err != nil {
 		return SaveNoteAssetResponse{}, appErr("asset.mkdir_failed", "Could not create asset folder", err)
 	}
@@ -883,7 +915,7 @@ func (s *Service) SaveNoteAsset(ctx context.Context, req SaveNoteAssetRequest) (
 		base := strings.TrimSuffix(fileName, ext)
 		assetPath = filepath.Join(assetDir, fmt.Sprintf("%s-%d%s", base, i, ext))
 	}
-	if err := ensurePathInside(ws.Root(), assetPath); err != nil {
+	if err := ensurePathInside(assetRoot, assetPath); err != nil {
 		return SaveNoteAssetResponse{}, appErr("asset.path_escape", "Asset path escapes workspace", err)
 	}
 	if err := os.WriteFile(assetPath, data, 0o644); err != nil {
@@ -972,6 +1004,10 @@ func (s *Service) MoveNote(ctx context.Context, req MoveNoteRequest) (NoteDTO, e
 	newID, err := ws.NormalizeNoteID(req.NewID)
 	if err != nil {
 		return NoteDTO{}, appErr("notes.invalid_id", "Invalid target note id", err)
+	}
+	newID, err = ws.QualifyRenamedNoteID(oldID, newID)
+	if err != nil {
+		return NoteDTO{}, appErr("notes.invalid_id", "Could not place the renamed note in a member workspace", err)
 	}
 	if oldID == newID {
 		return s.ReadNote(ctx, string(newID))
@@ -1764,16 +1800,22 @@ func movedImageSource(ws workspace.Workspace, oldID domain.NoteID, newID domain.
 		return raw, false
 	}
 	var target string
+	// Root-anchored links are relative to the workspace that holds the note,
+	// which on a composite is the owning member.
+	assetRoot, _, aerr := noteAssetRoot(ws, oldID)
+	if aerr != nil {
+		return raw, false
+	}
 	switch {
 	case strings.HasPrefix(pathPart, "/"):
-		target = filepath.Join(ws.Root(), filepath.FromSlash(strings.TrimPrefix(pathPart, "/")))
+		target = filepath.Join(assetRoot, filepath.FromSlash(strings.TrimPrefix(pathPart, "/")))
 	case strings.HasPrefix(pathPart, `\`):
-		target = filepath.Join(ws.Root(), filepath.FromSlash(strings.TrimLeft(strings.ReplaceAll(pathPart, `\`, "/"), "/")))
+		target = filepath.Join(assetRoot, filepath.FromSlash(strings.TrimLeft(strings.ReplaceAll(pathPart, `\`, "/"), "/")))
 	default:
 		target = filepath.Join(filepath.Dir(oldNotePath), filepath.FromSlash(strings.ReplaceAll(pathPart, `\`, "/")))
 	}
 	target = filepath.Clean(target)
-	if err := ensurePathInside(ws.Root(), target); err != nil {
+	if err := ensurePathInside(assetRoot, target); err != nil {
 		return raw, false
 	}
 	rel, err := filepath.Rel(filepath.Dir(newNotePath), target)
@@ -1817,7 +1859,11 @@ func resolveNoteAssetPath(ws workspace.Workspace, noteID domain.NoteID, raw stri
 	}
 	joined := filepath.Join(filepath.Dir(notePath), filepath.FromSlash(strings.ReplaceAll(raw, `\`, "/")))
 	clean := filepath.Clean(joined)
-	if err := ensurePathInside(ws.Root(), clean); err != nil {
+	assetRoot, _, err := noteAssetRoot(ws, noteID)
+	if err != nil {
+		return "", err
+	}
+	if err := ensurePathInside(assetRoot, clean); err != nil {
 		return "", err
 	}
 	return clean, nil
@@ -1897,6 +1943,22 @@ func uniqueImportedNoteID(ctx context.Context, repo *workspace.FileNoteRepositor
 			return candidate, nil
 		}
 	}
+}
+
+// noteAssetRoot answers "which directory tree do this note's images live in?".
+// On a composite that is the member that owns the note, not the composite root:
+// the composite holds only projections, so an asset written beneath it would
+// sit outside every workspace and its relative link from the note would climb
+// out of the corpus entirely.
+func noteAssetRoot(ws workspace.Workspace, noteID domain.NoteID) (string, domain.NoteID, error) {
+	if !ws.IsComposite() {
+		return ws.Root(), noteID, nil
+	}
+	member, memberID, err := ws.MemberForNoteID(noteID)
+	if err != nil {
+		return "", "", err
+	}
+	return member.Root(), memberID, nil
 }
 
 func ensurePathInside(root string, path string) error {

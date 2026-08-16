@@ -1,6 +1,6 @@
 // HTTP transport: fetch-based implementation of the binding surface for browser (server) mode.
 import type {application, main} from '../../wailsjs/go/models'
-import type {GitPRResult, GitSyncResult, GoMentalComposite, GoMentalSettings, MoveNoteRequest, NoteDTOWithVersion, NoteType, SaveNoteRequestWithVersion, SetNoteFavoriteRequest, SuggestLinksRequest, SuggestLinksResponse} from './types'
+import type {GitPRResult, GitSyncResult, GoMentalComposite, GoMentalSettings, GoMentalWorkspaceMember, ImportURLRequestWithMember, MoveNoteRequest, NoteDTOWithVersion, NoteType, SaveNoteRequestWithVersion, SetNoteFavoriteRequest, SuggestLinksRequest, SuggestLinksResponse} from './types'
 import {subscribe} from './events'
 
 // The generated App.d.ts references application.UIState, which is not defined in
@@ -129,7 +129,7 @@ export function MoveNote(req: MoveNoteRequest): Promise<NoteDTOWithVersion> {
   })
 }
 
-export function ImportURL(req: application.ImportURLRequest): Promise<application.NoteDTO> {
+export function ImportURL(req: ImportURLRequestWithMember): Promise<application.NoteDTO> {
   return request('/api/import', {method: 'POST', ...jsonBody({url: req.url})})
 }
 
@@ -189,6 +189,10 @@ export function RecentWorkspaces(): Promise<Array<application.RecentWorkspaceDTO
 
 export function Composite(): Promise<GoMentalComposite> {
   return request('/api/composite')
+}
+
+export function WorkspaceMembers(): Promise<GoMentalWorkspaceMember[]> {
+  return request('/api/workspace/members')
 }
 
 export function SaveComposite(memberRoots: string[]): Promise<GoMentalComposite> {
