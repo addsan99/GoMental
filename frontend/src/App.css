@@ -431,6 +431,22 @@ body.gm-resizing * { cursor: col-resize !important; }
   text-align: left;
 }
 .gm-open-menu-item:hover { background: var(--surface-2); }
+/* Starred rows gain a leading star column; the icon spans both text rows so the
+   name and path stay aligned with the unstarred entries below them. */
+.gm-open-menu-item-starred {
+  grid-template-columns: auto minmax(0, 1fr);
+  column-gap: 8px;
+}
+.gm-open-menu-star {
+  grid-row: 1 / span 2;
+  align-self: center;
+  color: var(--accent, #e0a33e);
+}
+.gm-recent-name .gm-open-menu-star {
+  grid-row: auto;
+  margin-right: 5px;
+  vertical-align: -1px;
+}
 .gm-open-menu-name {
   font: 600 13px/1.25 var(--font-ui);
   white-space: nowrap;

@@ -1590,6 +1590,11 @@ function App() {
   const fileNameShort = basename(selectedID);
   const dirty = saveState === 'dirty' || saveState === 'conflict';
   const currentWorkspaceSettings = workspace?.root ? workspaceSettingsFor(settings, workspace.root) : defaultWorkspaceSettings();
+  // The backend already hides roots that no longer exist and flags the starred
+  // ones. Starred workspaces are listed in full and are not counted against the
+  // recent cap — being permanently reachable is the whole point of starring.
+  const starredWorkspaces = useMemo(() => recent.filter((item) => item.starred), [recent]);
+  const recentWorkspaces = useMemo(() => recent.filter((item) => !item.starred).slice(0, 6), [recent]);
   const workspaceReadOnly = Boolean(workspace && currentWorkspaceSettings.accessMode !== 'editable' && currentWorkspaceSettings.accessMode !== 'writableGit');
   const readOnly = info.readOnly === true || workspaceReadOnly;
   readOnlyRef.current = readOnly;
@@ -1721,10 +1726,33 @@ function App() {
             </button>
             {openWorkspaceMenuOpen && (
               <div className="gm-open-menu" role="menu" aria-label="Open workspace">
-                {recent.slice(0, 6).length > 0 ? (
+                {starredWorkspaces.length > 0 && (
+                  <>
+                    <div className="gm-open-menu-label">Starred workspaces</div>
+                    {starredWorkspaces.map((item) => (
+                      <button
+                        type="button"
+                        className="gm-open-menu-item gm-open-menu-item-starred"
+                        role="menuitem"
+                        key={item.path}
+                        title={item.path}
+                        onClick={() => {
+                          setOpenWorkspaceMenuOpen(false);
+                          void openWorkspace(item.path);
+                        }}
+                      >
+                        <StarIcon size={13} filled className="gm-open-menu-star" />
+                        <span className="gm-open-menu-name">{basename(item.path)}</span>
+                        <span className="gm-open-menu-path">{item.path}</span>
+                      </button>
+                    ))}
+                    <div className="gm-open-menu-separator" />
+                  </>
+                )}
+                {recentWorkspaces.length > 0 ? (
                   <>
                     <div className="gm-open-menu-label">Recent workspaces</div>
-                    {recent.slice(0, 6).map((item) => (
+                    {recentWorkspaces.map((item) => (
                       <button
                         type="button"
                         className="gm-open-menu-item"
@@ -1742,9 +1770,9 @@ function App() {
                     ))}
                     <div className="gm-open-menu-separator" />
                   </>
-                ) : (
+                ) : starredWorkspaces.length === 0 ? (
                   <div className="gm-open-menu-empty">No recent workspaces</div>
-                )}
+                ) : null}
                 <button
                   type="button"
                   className="gm-open-menu-item gm-open-menu-browse"
@@ -2955,6 +2983,20 @@ function SettingsModal({
                         </div>
                         <label className="gm-setting-row">
                           <span>
+                            <strong>Star this workspace</strong>
+                            <small>Starred workspaces are always listed in the Open menu, even once they have aged out of the recent list.</small>
+                          </span>
+                          <input
+                            type="checkbox"
+                            checked={selectedWorkspaceSettings.starred}
+                            onChange={(event) => updateSelectedWorkspaceSettings({
+                              ...selectedWorkspaceSettings,
+                              starred: event.target.checked,
+                            })}
+                          />
+                        </label>
+                        <label className="gm-setting-row">
+                          <span>
                             <strong>Access mode</strong>
                             <small>Controls how GoMental should treat local edits for this workspace.</small>
                           </span>
@@ -3263,7 +3305,10 @@ function RecentWorkspaceList({
       <div className="gm-section-title gm-recent-title">Recent workspaces</div>
       {visibleRecent.map((item) => (
         <button type="button" className="gm-recent-row" key={item.path} onClick={() => onOpen(item.path)} disabled={disabled}>
-          <span className="gm-recent-name">{basename(item.path)}</span>
+          <span className="gm-recent-name">
+            {item.starred && <StarIcon size={12} filled className="gm-open-menu-star" />}
+            {basename(item.path)}
+          </span>
           <span className="gm-recent-path">{item.path}</span>
         </button>
       ))}
@@ -3631,6 +3676,7 @@ function defaultWorkspaceSettings(): GoMentalWorkspaceSettings {
     defaultType: 'term',
     enabledTypes: [],
     accessMode: 'editable',
+    starred: false,
     gitUrl: '',
     gitBaseRef: 'main',
     gitPath: '',
@@ -3663,6 +3709,7 @@ function normalizeWorkspaceSettings(value: GoMentalWorkspaceSettings): GoMentalW
     defaultType,
     enabledTypes,
     accessMode,
+    starred: value?.starred === true,
     gitUrl: accessMode === 'readOnlyGit' || accessMode === 'writableGit' ? (value?.gitUrl || '').trim() : '',
     gitBaseRef: accessMode === 'readOnlyGit' || accessMode === 'writableGit' ? (value?.gitBaseRef || 'main').trim() : '',
     gitPath: accessMode === 'writableGit' ? (value?.gitPath || '').trim() : '',

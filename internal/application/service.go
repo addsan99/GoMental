@@ -307,6 +307,7 @@ type RebuildResultDTO struct {
 type RecentWorkspaceDTO struct {
 	Path     string `json:"path"`
 	OpenedAt string `json:"openedAt"`
+	Starred  bool   `json:"starred"`
 }
 
 type UIState map[string]any
@@ -339,6 +340,7 @@ type WorkspaceSettings struct {
 	DefaultType    string                 `json:"defaultType"`
 	EnabledTypes   []string               `json:"enabledTypes"`
 	AccessMode     string                 `json:"accessMode"`
+	Starred        bool                   `json:"starred,omitempty"`
 	GitURL         string                 `json:"gitUrl,omitempty"`
 	GitBaseRef     string                 `json:"gitBaseRef,omitempty"`
 	GitPath        string                 `json:"gitPath,omitempty"`
@@ -1449,15 +1451,48 @@ func (s *Service) Rebuild(ctx context.Context) (RebuildResultDTO, error) {
 	return dto, nil
 }
 
+// RecentWorkspaces lists the workspaces offered in the open-workspace menu:
+// every starred workspace, then the most recently opened ones. Starred entries
+// are included even when they have aged out of the recent file, which is the
+// point of starring; both sets are filtered to roots that still exist on disk.
 func (s *Service) RecentWorkspaces(ctx context.Context) ([]RecentWorkspaceDTO, error) {
 	items, err := s.recentStore.List(ctx)
 	if err != nil {
 		return nil, appErr("workspace.recent_failed", "Could not read recent workspaces", err)
 	}
-	out := make([]RecentWorkspaceDTO, len(items))
-	for i, item := range items {
-		out[i] = RecentWorkspaceDTO{Path: item.Path, OpenedAt: item.OpenedAt.Format(timeFormat)}
+	// Settings are advisory here: a starred workspace is a nicety, so a broken
+	// settings file should not take the recent list down with it.
+	starred := map[string]bool{}
+	if settings, settingsErr := s.LoadSettings(ctx); settingsErr == nil {
+		for root, ws := range settings.Workspaces {
+			if ws.Starred {
+				starred[filepath.Clean(root)] = true
+			}
+		}
 	}
+	out := make([]RecentWorkspaceDTO, 0, len(items)+len(starred))
+	seen := map[string]bool{}
+	for _, item := range items {
+		clean := filepath.Clean(item.Path)
+		seen[clean] = true
+		out = append(out, RecentWorkspaceDTO{
+			Path:     item.Path,
+			OpenedAt: item.OpenedAt.Format(timeFormat),
+			Starred:  starred[clean],
+		})
+	}
+	missingStars := make([]string, 0, len(starred))
+	for root := range starred {
+		if !seen[root] && workspace.RootExists(root) {
+			missingStars = append(missingStars, root)
+		}
+	}
+	sort.Strings(missingStars)
+	for _, root := range missingStars {
+		out = append(out, RecentWorkspaceDTO{Path: root, Starred: true})
+	}
+	// Stable so the recency order survives within each group.
+	sort.SliceStable(out, func(i, j int) bool { return out[i].Starred && !out[j].Starred })
 	return out, nil
 }
 
