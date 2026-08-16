@@ -105,6 +105,17 @@ func WriteCompositeConfig(root string, memberRoots []string) error {
 	return os.WriteFile(path, raw, 0o644)
 }
 
+// DefaultCompositeRoot is the app-managed directory that hosts the single
+// composite workspace. The composite holds only projections, so it does not
+// belong among the user's own note directories.
+func DefaultCompositeRoot() (string, error) {
+	configDir, err := os.UserConfigDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(configDir, "GoMental", "composite"), nil
+}
+
 // CompositeMemberRoots returns the member roots configured for a composite root,
 // in order, without opening them.
 func CompositeMemberRoots(root string) ([]string, error) {
@@ -117,6 +128,22 @@ func CompositeMemberRoots(root string) ([]string, error) {
 		roots = append(roots, m.Root)
 	}
 	return roots, nil
+}
+
+// CompositePrefixFor reports the prefix a composite assigns to a member root,
+// or "" when that root is not a member.
+func CompositePrefixFor(root, memberRoot string) string {
+	cfg, err := readCompositeConfig(root)
+	if err != nil {
+		return ""
+	}
+	target := filepath.Clean(memberRoot)
+	for _, member := range cfg.Members {
+		if filepath.Clean(member.Root) == target {
+			return member.Prefix
+		}
+	}
+	return ""
 }
 
 func readCompositeConfig(root string) (compositeConfig, error) {

@@ -146,6 +146,8 @@ func (s *Server) buildHandler() http.Handler {
 	mux.HandleFunc("GET /api/keys", s.gate(auth.RoleAdmin, s.handleListKeys))
 	mux.HandleFunc("DELETE /api/keys/{id}", s.gate(auth.RoleAdmin, s.handleRevokeKey))
 	mux.HandleFunc("GET /api/recent", s.gate(auth.RoleViewer, s.handleRecent))
+	mux.HandleFunc("GET /api/composite", s.gate(auth.RoleViewer, s.handleComposite))
+	mux.HandleFunc("PUT /api/composite", s.gate(auth.RoleAdmin, s.handleSaveComposite))
 	mux.HandleFunc("GET /api/notes", s.gate(auth.RoleViewer, s.handleListNotes))
 	mux.HandleFunc("POST /api/notes/move", s.gate(auth.RoleEditor, s.contentWrite(s.handleMoveNote)))
 	mux.HandleFunc("GET /api/notes/{id...}", s.gate(auth.RoleViewer, s.handleReadNote))

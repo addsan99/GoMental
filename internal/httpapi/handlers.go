@@ -64,6 +64,32 @@ func (s *Server) handleRecent(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, items)
 }
 
+// GET /api/composite
+func (s *Server) handleComposite(w http.ResponseWriter, r *http.Request) {
+	dto, err := s.service().Composite(r.Context())
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, dto)
+}
+
+// PUT /api/composite
+func (s *Server) handleSaveComposite(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Members []string `json:"members"`
+	}
+	if !decodeJSON(w, r, &body) {
+		return
+	}
+	dto, err := s.service().SaveComposite(r.Context(), body.Members)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, dto)
+}
+
 // GET /api/notes — returns the full note array by default. When a `limit` query
 // param is present it returns a paginated NotesPageDTO instead (offset, limit,
 // sort, desc, tag, q), served from the SQLite note projection.

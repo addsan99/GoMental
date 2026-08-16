@@ -40,6 +40,7 @@ import {
 } from './ui/icons';
 import {
   Backlinks,
+  Composite,
   DeleteNote,
   DeleteNoteType,
   GitMergePullRequest,
@@ -58,6 +59,7 @@ import {
   ReadNote,
   Rebuild,
   RecentWorkspaces,
+  SaveComposite,
   SaveNote,
   SaveNoteType,
   SaveNoteAsset,
@@ -70,7 +72,7 @@ import {
   onEvent,
 } from './transport';
 import type {application} from '../wailsjs/go/models';
-import type {AppInfoWithMode, GoMentalSettings, GoMentalWorkspaceSettings, LinkSuggestion, NoteDTOWithVersion, NoteType} from './transport/types';
+import type {AppInfoWithMode, GoMentalComposite, GoMentalSettings, GoMentalWorkspaceSettings, LinkSuggestion, NoteDTOWithVersion, NoteType} from './transport/types';
 import {CSS_VARIABLE_NAMES, cssVariablesForTheme, loadVSCodeTheme} from './themes/vscode';
 import {themeOption, vscodeThemeOptions} from './themes/catalog';
 
@@ -133,7 +135,7 @@ type SaveState = 'idle' | 'dirty' | 'saving' | 'saved' | 'conflict';
 type SearchStatus = 'idle' | 'searching' | 'ready' | 'error';
 type WorkspaceTab = 'note' | 'graph';
 type ThemeMode = string;
-type SettingsSection = 'appearance' | 'noteView' | 'graphView' | 'workspaceSettings' | 'types';
+type SettingsSection = 'appearance' | 'noteView' | 'graphView' | 'workspaceSettings' | 'composite' | 'types';
 
 // Above this many rendered graph nodes, 3D is auto-disabled: thousands of lit
 // spheres + text sprites orbiting is far heavier than the flat top-down view, and
@@ -2501,6 +2503,10 @@ function App() {
           }
           return path;
         }}
+        onOpenWorkspace={(root) => {
+          setSettingsOpen(false);
+          void openWorkspace(root);
+        }}
         onChange={persistSettings}
         onSaveNoteType={async (definition) => {
           let saved: NoteType;
@@ -2617,6 +2623,7 @@ function SettingsModal({
   onClose,
   onSectionChange,
   onBrowseWorkspace,
+  onOpenWorkspace,
   onChange,
   onSaveNoteType,
   onDeleteNoteType,
@@ -2632,6 +2639,7 @@ function SettingsModal({
   onClose: () => void;
   onSectionChange: (section: SettingsSection) => void;
   onBrowseWorkspace: () => Promise<string>;
+  onOpenWorkspace: (root: string) => void;
   onChange: (settings: GoMentalSettings) => void;
   onSaveNoteType: (definition: NoteType) => Promise<void>;
   onDeleteNoteType: (id: string) => Promise<void>;
@@ -2675,6 +2683,7 @@ function SettingsModal({
     {id: 'noteView', label: 'Note View'},
     {id: 'graphView', label: 'Graph View'},
     {id: 'workspaceSettings', label: 'Workspace Settings'},
+    {id: 'composite', label: 'Composite Workspace'},
     {id: 'types', label: 'Note Types'},
   ];
   const saveLabel = saveState === 'saving' ? 'Saving...' : saveState === 'saved' ? 'Saved' : saveState === 'error' ? 'Could not save' : 'Auto-saved';
@@ -2898,6 +2907,15 @@ function SettingsModal({
                     </div>
                   </div>
                 ) : <div className="gm-workspace-empty gm-workspace-empty-large">Open a workspace to manage its installed types.</div>}
+              </SettingsGroup>
+            )}
+            {activeSection === 'composite' && (
+              <SettingsGroup title="Composite Workspace">
+                <CompositeSettings
+                  knownWorkspaces={workspacePaths}
+                  onBrowseWorkspace={onBrowseWorkspace}
+                  onOpenWorkspace={onOpenWorkspace}
+                />
               </SettingsGroup>
             )}
             {activeSection === 'workspaceSettings' && (
@@ -3185,6 +3203,143 @@ function SettingsModal({
             )}
           </section>
         </div>
+      </div>
+    </div>
+  );
+}
+
+// CompositeSettings edits the single composite workspace: the set of workspaces
+// it spans. Members are stored by absolute path, and the composite is rebuilt
+// the next time it is opened rather than on save, so editing the list stays
+// cheap.
+function CompositeSettings({
+  knownWorkspaces,
+  onBrowseWorkspace,
+  onOpenWorkspace,
+}: {
+  knownWorkspaces: string[];
+  onBrowseWorkspace: () => Promise<string>;
+  onOpenWorkspace: (root: string) => void;
+}) {
+  const [composite, setComposite] = useState<GoMentalComposite | null>(null);
+  const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading');
+  const [error, setError] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    Composite()
+      .then((next) => {
+        if (!cancelled) {
+          setComposite(next);
+          setStatus('ready');
+        }
+      })
+      .catch((err) => {
+        if (!cancelled) {
+          setError(errorMessage(err));
+          setStatus('error');
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const memberRoots = composite?.members.map((member) => member.root) ?? [];
+  const save = async (roots: string[]) => {
+    setBusy(true);
+    setError('');
+    try {
+      setComposite(await SaveComposite(roots));
+    } catch (err) {
+      setError(errorMessage(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+  const addMember = async (root: string) => {
+    const trimmed = root.trim();
+    if (!trimmed || memberRoots.includes(trimmed)) {
+      return;
+    }
+    await save([...memberRoots, trimmed]);
+  };
+
+  if (status === 'loading') {
+    return <div className="gm-workspace-empty">Loading...</div>;
+  }
+
+  const available = knownWorkspaces.filter((path) => !memberRoots.includes(path) && path !== composite?.root);
+
+  return (
+    <div className="gm-composite">
+      <p className="gm-composite-intro">
+        A composite workspace shows several workspaces at once — one note list, one search index and one graph.
+        Notes stay in the workspace that owns them, and edits are written straight back there.
+      </p>
+      {error ? <div className="gm-composite-error">{error}</div> : null}
+      <div className="gm-composite-members">
+        {composite && composite.members.length > 0 ? (
+          composite.members.map((member) => (
+            <div className={member.missing ? 'gm-composite-member missing' : 'gm-composite-member'} key={member.root}>
+              <div className="gm-composite-member-text">
+                <span className="gm-workspace-name">
+                  {member.name}
+                  <code className="gm-composite-prefix">{member.prefix}/</code>
+                </span>
+                <span className="gm-workspace-path">{member.root}</span>
+                {member.missing ? <small className="gm-composite-missing">Not found on disk — its notes are skipped.</small> : null}
+              </div>
+              <button
+                type="button"
+                className="gm-btn gm-btn-sm gm-btn-ghost"
+                disabled={busy}
+                onClick={() => void save(memberRoots.filter((root) => root !== member.root))}
+              >
+                Remove
+              </button>
+            </div>
+          ))
+        ) : (
+          <div className="gm-workspace-empty">No workspaces yet. Add two or more to build a composite.</div>
+        )}
+      </div>
+      <div className="gm-composite-actions">
+        <button
+          type="button"
+          className="gm-btn gm-btn-sm gm-btn-ghost"
+          disabled={busy}
+          onClick={() => void onBrowseWorkspace().then((path) => addMember(path))}
+        >
+          <FolderIcon size={14} />Add workspace
+        </button>
+        {available.length > 0 ? (
+          <select
+            value=""
+            disabled={busy}
+            onChange={(event) => {
+              const value = event.target.value;
+              event.target.value = '';
+              if (value) {
+                void addMember(value);
+              }
+            }}
+          >
+            <option value="">Add a known workspace...</option>
+            {available.map((path) => (
+              <option key={path} value={path}>{basename(path)} — {path}</option>
+            ))}
+          </select>
+        ) : null}
+        <button
+          type="button"
+          className="gm-btn gm-btn-sm"
+          disabled={busy || !composite?.configured}
+          onClick={() => composite && onOpenWorkspace(composite.root)}
+        >
+          Open composite
+        </button>
       </div>
     </div>
   );

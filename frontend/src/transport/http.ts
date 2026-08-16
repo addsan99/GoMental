@@ -1,6 +1,6 @@
 // HTTP transport: fetch-based implementation of the binding surface for browser (server) mode.
 import type {application, main} from '../../wailsjs/go/models'
-import type {GitPRResult, GitSyncResult, GoMentalSettings, MoveNoteRequest, NoteDTOWithVersion, NoteType, SaveNoteRequestWithVersion, SetNoteFavoriteRequest, SuggestLinksRequest, SuggestLinksResponse} from './types'
+import type {GitPRResult, GitSyncResult, GoMentalComposite, GoMentalSettings, MoveNoteRequest, NoteDTOWithVersion, NoteType, SaveNoteRequestWithVersion, SetNoteFavoriteRequest, SuggestLinksRequest, SuggestLinksResponse} from './types'
 import {subscribe} from './events'
 
 // The generated App.d.ts references application.UIState, which is not defined in
@@ -185,6 +185,14 @@ export function Rebuild(): Promise<application.RebuildResultDTO> {
 
 export function RecentWorkspaces(): Promise<Array<application.RecentWorkspaceDTO>> {
   return request('/api/recent')
+}
+
+export function Composite(): Promise<GoMentalComposite> {
+  return request('/api/composite')
+}
+
+export function SaveComposite(memberRoots: string[]): Promise<GoMentalComposite> {
+  return request('/api/composite', {method: 'PUT', ...jsonBody({members: memberRoots})})
 }
 
 export function LoadUIState(): Promise<UIState> {

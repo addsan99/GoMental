@@ -625,6 +625,16 @@ func (a *App) RecentWorkspaces() ([]application.RecentWorkspaceDTO, error) {
 	return items, nil
 }
 
+// Composite returns the definition of the composite workspace.
+func (a *App) Composite() (application.CompositeDTO, error) {
+	return a.service().Composite(a.context())
+}
+
+// SaveComposite redefines which workspaces the composite spans.
+func (a *App) SaveComposite(memberRoots []string) (application.CompositeDTO, error) {
+	return a.service().SaveComposite(a.context(), memberRoots)
+}
+
 func (a *App) LoadUIState() (application.UIState, error) {
 	return a.service().LoadUIState(a.context())
 }

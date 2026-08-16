@@ -25,7 +25,7 @@ import {
   SelectWorkspaceDirectory,
 } from '../../wailsjs/go/main/App'
 import {EventsOn} from '../../wailsjs/runtime/runtime'
-import type {GitPRResult, GitSyncResult, GoMentalSettings, MoveNoteRequest, NoteDTOWithVersion, NoteType, SaveNoteRequestWithVersion, SetNoteFavoriteRequest, SuggestLinksRequest, SuggestLinksResponse} from './types'
+import type {GitPRResult, GitSyncResult, GoMentalComposite, GoMentalSettings, MoveNoteRequest, NoteDTOWithVersion, NoteType, SaveNoteRequestWithVersion, SetNoteFavoriteRequest, SuggestLinksRequest, SuggestLinksResponse} from './types'
 
 export {
   Backlinks,
@@ -143,4 +143,20 @@ export function ImportNoteTypeCollection(content: string): Promise<NoteType[]> {
 
 export function onEvent(name: string, cb: (...data: any[]) => void): () => void {
   return EventsOn(name, cb)
+}
+
+export function Composite(): Promise<GoMentalComposite> {
+  const app = (window as any)?.go?.main?.App
+  if (!app || typeof app.Composite !== 'function') {
+    return Promise.reject(new Error('composite workspaces are not available in this build'))
+  }
+  return app.Composite()
+}
+
+export function SaveComposite(memberRoots: string[]): Promise<GoMentalComposite> {
+  const app = (window as any)?.go?.main?.App
+  if (!app || typeof app.SaveComposite !== 'function') {
+    return Promise.reject(new Error('composite workspaces are not available in this build'))
+  }
+  return app.SaveComposite(memberRoots)
 }

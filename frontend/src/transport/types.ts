@@ -148,3 +148,16 @@ export type NoteType = {
   template: string
   source: string
 }
+
+export interface GoMentalCompositeMember {
+  root: string
+  name: string
+  prefix: string
+  missing: boolean
+}
+
+export interface GoMentalComposite {
+  root: string
+  configured: boolean
+  members: GoMentalCompositeMember[]
+}
