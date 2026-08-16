@@ -11,6 +11,7 @@ import (
 	"GoMental/internal/domain"
 	"GoMental/internal/graph"
 	"GoMental/internal/search"
+	"GoMental/internal/workspace"
 )
 
 func TestRebuildBuildsSearchGraphAndState(t *testing.T) {
@@ -254,5 +255,92 @@ func TestRebuildAppliesWorkspaceIngestProfile(t *testing.T) {
 	}
 	if len(tagged) != 1 || tagged[0].ID != "topics/alpha" {
 		t.Fatalf("mapped tag is not filterable: %#v", tagged)
+	}
+}
+
+// A composite has to keep each member's wiki-links pointing inside that member,
+// even when both members use the same note names, while still letting shared
+// tags join them into one graph.
+func TestRebuildComposite(t *testing.T) {
+	base := t.TempDir()
+	alpha := filepath.Join(base, "alpha")
+	beta := filepath.Join(base, "beta")
+	root := filepath.Join(base, "all")
+	for _, dir := range []string{alpha, beta, root} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// Both members contain a "shared" note, and both link to it by bare name.
+	writeNote(t, alpha, "entry.md", "---\ntype: concept\ntitle: Alpha entry\ntags: [common]\n---\n\n# Alpha entry\nSee [[shared]].\n")
+	writeNote(t, alpha, "shared.md", "---\ntype: concept\ntitle: Alpha shared\ntags: [common]\n---\n\n# Alpha shared\n")
+	writeNote(t, beta, "entry.md", "---\ntype: concept\ntitle: Beta entry\ntags: [common]\n---\n\n# Beta entry\nSee [[shared]].\n")
+	writeNote(t, beta, "shared.md", "---\ntype: concept\ntitle: Beta shared\ntags: [common]\n---\n\n# Beta shared\n")
+
+	if err := workspace.WriteCompositeConfig(root, []string{alpha, beta}); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := Rebuilder{WorkerCount: 2, Now: fixedNow}.Rebuild(context.Background(), root)
+	if err != nil {
+		t.Fatalf("rebuild composite: %v", err)
+	}
+	if result.TotalNotes != 4 || result.ParsedNotes != 4 {
+		t.Fatalf("expected all 4 member notes, got %#v", result)
+	}
+
+	store, err := graph.OpenSQLiteStore(result.GraphPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+
+	// Each member's link must land on its own shared note, not the other's.
+	for _, member := range []string{"alpha", "beta"} {
+		backlinks, err := store.Backlinks(context.Background(), domain.NoteID(member+"/shared"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(backlinks) != 1 || backlinks[0].Source != domain.NoteID(member+"/entry") {
+			t.Fatalf("%s/shared has backlinks %#v; expected only %s/entry", member, backlinks, member)
+		}
+	}
+
+	// Wiki-links cannot cross members, so what carries the composite is the
+	// shared metadata hubs: a tag both members use must gather both members.
+	joined, err := store.Query(context.Background(), domain.GraphQuery{
+		MetadataSeed:         "tag:common",
+		Depth:                1,
+		IncludeMetadataLinks: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	reached := map[string]bool{}
+	for _, node := range joined.Nodes {
+		if node.NoteID != nil {
+			reached[string(*node.NoteID)] = true
+		}
+	}
+	if !reached["beta/entry"] {
+		t.Fatalf("expected the shared tag to connect members; reached %v", reached)
+	}
+
+	// Search spans members and reports namespaced ids.
+	idx, err := search.OpenBleveIndex(result.SearchPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer idx.Close()
+	hits, err := idx.Search(context.Background(), domain.SearchQuery{Text: "shared", Limit: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := map[string]bool{}
+	for _, hit := range hits {
+		found[string(hit.ID)] = true
+	}
+	if !found["alpha/shared"] || !found["beta/shared"] {
+		t.Fatalf("expected both members' notes in search, got %v", found)
 	}
 }

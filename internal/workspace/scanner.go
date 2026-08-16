@@ -21,6 +21,22 @@ type ScannedNote struct {
 }
 
 func (w Workspace) ScanNotes(ctx context.Context) ([]ScannedNote, error) {
+	if w.IsComposite() {
+		var notes []ScannedNote
+		for _, member := range w.members {
+			memberNotes, err := member.ws.ScanNotes(ctx)
+			if err != nil {
+				return nil, fmt.Errorf("member %s: %w", member.Prefix, err)
+			}
+			for _, note := range memberNotes {
+				note.ID = member.NamespaceNoteID(note.ID)
+				note.DisplayPath = domain.NotePath(member.Prefix + "/" + string(note.DisplayPath))
+				notes = append(notes, note)
+			}
+		}
+		sortScannedNotes(notes)
+		return notes, nil
+	}
 	var notes []ScannedNote
 	seen := map[string]domain.NoteID{}
 	err := filepath.WalkDir(w.root, func(path string, entry fs.DirEntry, walkErr error) error {
@@ -79,10 +95,14 @@ func (w Workspace) ScanNotes(ctx context.Context) ([]ScannedNote, error) {
 	if err != nil {
 		return nil, err
 	}
+	sortScannedNotes(notes)
+	return notes, nil
+}
+
+func sortScannedNotes(notes []ScannedNote) {
 	sort.Slice(notes, func(i, j int) bool {
 		return strings.ToLower(string(notes[i].ID)) < strings.ToLower(string(notes[j].ID))
 	})
-	return notes, nil
 }
 
 func shouldSkipDir(name string) bool {

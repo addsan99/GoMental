@@ -16,6 +16,7 @@ type Workspace struct {
 	root        string
 	metadataDir string
 	mapping     ingest.Mapping
+	members     []Member
 }
 
 func Open(root string) (Workspace, error) {
@@ -45,7 +46,11 @@ func OpenWithMetadataDir(root, metadataDir string) (Workspace, error) {
 	if err != nil {
 		return Workspace{}, fmt.Errorf("%w: %v", ErrInvalidWorkspaceRoot, err)
 	}
-	return Workspace{root: clean, metadataDir: metadataDir, mapping: mapping}, nil
+	members, err := openMembers(clean, metadataDir)
+	if err != nil {
+		return Workspace{}, fmt.Errorf("%w: %v", ErrInvalidWorkspaceRoot, err)
+	}
+	return Workspace{root: clean, metadataDir: metadataDir, mapping: mapping, members: members}, nil
 }
 
 // Mapping returns the workspace's ingest profile (zero value when it has none).
@@ -100,6 +105,13 @@ func isWindowsDrivePrefix(path string) bool {
 }
 
 func (w Workspace) PathForNoteID(id domain.NoteID) (string, error) {
+	if w.IsComposite() {
+		member, memberID, err := w.MemberForNoteID(id)
+		if err != nil {
+			return "", err
+		}
+		return member.ws.PathForNoteID(memberID)
+	}
 	normalized, err := w.NormalizeNoteID(string(id))
 	if err != nil {
 		return "", err
@@ -113,6 +125,17 @@ func (w Workspace) PathForNoteID(id domain.NoteID) (string, error) {
 }
 
 func (w Workspace) NoteIDFromPath(path string) (domain.NoteID, error) {
+	if w.IsComposite() {
+		member, ok := w.MemberForPath(path)
+		if !ok {
+			return "", ErrPathEscapesWorkspace
+		}
+		id, err := member.ws.NoteIDFromPath(path)
+		if err != nil {
+			return "", err
+		}
+		return member.NamespaceNoteID(id), nil
+	}
 	abs, err := filepath.Abs(path)
 	if err != nil {
 		return "", err
@@ -137,6 +160,11 @@ func (w Workspace) NoteIDFromPath(path string) (domain.NoteID, error) {
 }
 
 func (w Workspace) IsMetadataPath(path string) bool {
+	if w.IsComposite() {
+		if member, ok := w.MemberForPath(path); ok && member.ws.IsMetadataPath(path) {
+			return true
+		}
+	}
 	abs, err := filepath.Abs(path)
 	if err != nil {
 		return false
@@ -150,6 +178,11 @@ func (w Workspace) IsMetadataPath(path string) bool {
 }
 
 func (w Workspace) ensureInside(path string) error {
+	if w.IsComposite() {
+		if _, ok := w.MemberForPath(path); ok {
+			return nil
+		}
+	}
 	abs, err := filepath.Abs(path)
 	if err != nil {
 		return err
