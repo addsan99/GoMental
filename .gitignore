@@ -25,3 +25,6 @@ aie.brains/
 .gocache/
 .tmp-go/
 github_mynotes_repo_PAT.txt
+
+# macOS
+.DS_Store
