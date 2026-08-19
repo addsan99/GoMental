@@ -375,6 +375,68 @@ func TestServiceMoveNoteRewritesLocalImageLinks(t *testing.T) {
 	}
 }
 
+// A move also re-bases non-image references: attachment links, reference-style
+// definitions, href attributes, and relative Markdown links to sibling notes,
+// which okf.candidateTarget resolves against the source note's own directory.
+func TestServiceMoveNoteRewritesNonImageLinks(t *testing.T) {
+	root := t.TempDir()
+	assetDir := filepath.Join(root, "assets", "recipes")
+	if err := os.MkdirAll(assetDir, 0o755); err != nil {
+		t.Fatalf("create asset dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(assetDir, "spec.pdf"), []byte("pdf"), 0o644); err != nil {
+		t.Fatalf("write asset: %v", err)
+	}
+	writeNote(t, root, "recipes/sibling.md", "---\ntype: concept\ntitle: Sibling\n---\n")
+	content := "---\ntype: recipe\ntitle: Doc\n---\n\n" +
+		"[spec](../assets/recipes/spec.pdf)\n" +
+		"<a href=\"../assets/recipes/spec.pdf\">spec</a>\n" +
+		"[sibling](sibling)\n" +
+		"[anchored](sibling#section)\n" +
+		"[ref][spec-ref]\n" +
+		"[external](https://example.com/spec.pdf)\n" +
+		"[jump](#local-heading)\n" +
+		"[[recipes/sibling]]\n\n" +
+		"[spec-ref]: ../assets/recipes/spec.pdf\n"
+	writeNote(t, root, "recipes/doc.md", content)
+	service := testService(t, nil)
+	ctx := context.Background()
+	if _, err := service.OpenWorkspace(ctx, root); err != nil {
+		t.Fatalf("open workspace: %v", err)
+	}
+
+	moved, err := service.MoveNote(ctx, MoveNoteRequest{ID: "recipes/doc", NewID: "doc"})
+	if err != nil {
+		t.Fatalf("move note: %v", err)
+	}
+	for _, want := range []string{
+		"[spec](assets/recipes/spec.pdf)",
+		`href="assets/recipes/spec.pdf"`,
+		"[sibling](recipes/sibling)",
+		"[anchored](recipes/sibling#section)",
+		"[spec-ref]: assets/recipes/spec.pdf",
+		// Absolute URLs, pure anchors and wiki links resolve from the workspace
+		// root (or not at all), so a move must leave them untouched.
+		"[external](https://example.com/spec.pdf)",
+		"[jump](#local-heading)",
+		"[[recipes/sibling]]",
+	} {
+		if !strings.Contains(moved.Content, want) {
+			t.Fatalf("expected %q after move:\n%s", want, moved.Content)
+		}
+	}
+
+	// Moving back must restore the original targets exactly; a rewrite that
+	// double-applied would drift further away on each move.
+	back, err := service.MoveNote(ctx, MoveNoteRequest{ID: "doc", NewID: "recipes/doc"})
+	if err != nil {
+		t.Fatalf("move note back: %v", err)
+	}
+	if back.Content != content {
+		t.Fatalf("round-trip move did not restore the original content:\nwant:\n%s\ngot:\n%s", content, back.Content)
+	}
+}
+
 func TestServiceSaveDeleteRecentAndUIState(t *testing.T) {
 	root := t.TempDir()
 	writeNote(t, root, "alpha.md", "---\ntype: concept\ntitle: Alpha\n---\n")

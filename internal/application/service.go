@@ -1033,10 +1033,10 @@ func (s *Service) MoveNote(ctx context.Context, req MoveNoteRequest) (NoteDTO, e
 	if err != nil {
 		return NoteDTO{}, appErr("notes.read_failed", "Could not read moved note", err)
 	}
-	if rewritten := rewriteMovedImageLinks(ws, oldID, newID, read.Document.Raw); rewritten != read.Document.Raw {
+	if rewritten := rewriteMovedLinks(ws, oldID, newID, read.Document.Raw); rewritten != read.Document.Raw {
 		read.Document.Raw = rewritten
 		if err := repo.Save(ctx, read); err != nil {
-			return NoteDTO{}, appErr("notes.move_rewrite_failed", "Could not update moved note image links", err)
+			return NoteDTO{}, appErr("notes.move_rewrite_failed", "Could not update moved note links", err)
 		}
 		read, err = repo.Read(ctx, newID)
 		if err != nil {
@@ -1736,53 +1736,82 @@ func markdownAltText(fileName string) string {
 }
 
 var (
-	markdownImageLinkPattern = regexp.MustCompile(`\\?!\[([^\]]*)\]\(([^)]+)\)`)
-	htmlDoubleSrcPattern     = regexp.MustCompile(`\bsrc="([^"]+)"`)
-	htmlSingleSrcPattern     = regexp.MustCompile(`\bsrc='([^']+)'`)
+	// One pattern for images and inline links alike: group 1 holds the image
+	// bang (possibly escaped) and is empty for a plain link. Matching both in a
+	// single pass keeps the rewrite idempotent — a two-pass version would
+	// re-resolve image targets that the first pass had already corrected.
+	markdownInlineTargetPattern = regexp.MustCompile(`(\\?!)?\[([^\]]*)\]\(([^)]+)\)`)
+	// Reference-style definitions, e.g. `[spec]: ../assets/spec.pdf "Title"`.
+	markdownRefDefinitionPattern = regexp.MustCompile(`(?m)^([ \t]*\[[^\]^][^\]]*\]:[ \t]*)(<[^>]*>|\S+)([ \t]+.*)?$`)
+	htmlDoubleAttrPattern        = regexp.MustCompile(`\b(src|href)="([^"]+)"`)
+	htmlSingleAttrPattern        = regexp.MustCompile(`\b(src|href)='([^']+)'`)
 )
 
-func rewriteMovedImageLinks(ws workspace.Workspace, oldID domain.NoteID, newID domain.NoteID, content string) string {
-	content = markdownImageLinkPattern.ReplaceAllStringFunc(content, func(match string) string {
-		parts := markdownImageLinkPattern.FindStringSubmatch(match)
+// rewriteMovedLinks re-bases a note's own relative references after it moves to
+// a new folder. This covers both asset links (images, attachments) and relative
+// Markdown links to other notes, which okf.candidateTarget resolves against the
+// source note's directory and which therefore break the same way.
+//
+// Targets are rewritten in place rather than swapped for absolute placeholders
+// so notes stay portable, standards-compliant Markdown that renders correctly
+// outside GoMental. Wiki links need no rewriting: they resolve from the
+// workspace root, so a move cannot invalidate them.
+func rewriteMovedLinks(ws workspace.Workspace, oldID domain.NoteID, newID domain.NoteID, content string) string {
+	content = markdownInlineTargetPattern.ReplaceAllStringFunc(content, func(match string) string {
+		parts := markdownInlineTargetPattern.FindStringSubmatch(match)
+		if len(parts) != 4 {
+			return match
+		}
+		next, ok := movedLinkTarget(ws, oldID, newID, parts[3])
+		if !ok {
+			return match
+		}
+		return fmt.Sprintf("%s[%s](%s)", parts[1], parts[2], next)
+	})
+	content = markdownRefDefinitionPattern.ReplaceAllStringFunc(content, func(match string) string {
+		parts := markdownRefDefinitionPattern.FindStringSubmatch(match)
+		if len(parts) != 4 {
+			return match
+		}
+		target, wrapped := parts[2], false
+		if strings.HasPrefix(target, "<") && strings.HasSuffix(target, ">") {
+			target, wrapped = strings.TrimSuffix(strings.TrimPrefix(target, "<"), ">"), true
+		}
+		next, ok := movedLinkTarget(ws, oldID, newID, target)
+		if !ok {
+			return match
+		}
+		if wrapped {
+			next = "<" + next + ">"
+		}
+		return parts[1] + next + parts[3]
+	})
+	content = htmlDoubleAttrPattern.ReplaceAllStringFunc(content, func(match string) string {
+		parts := htmlDoubleAttrPattern.FindStringSubmatch(match)
 		if len(parts) != 3 {
 			return match
 		}
-		next, ok := movedImageSource(ws, oldID, newID, parts[2])
+		next, ok := movedLinkTarget(ws, oldID, newID, parts[2])
 		if !ok {
 			return match
 		}
-		bang := "!"
-		if strings.HasPrefix(match, `\!`) {
-			bang = `\!`
-		}
-		return fmt.Sprintf("%s[%s](%s)", bang, parts[1], next)
+		return parts[1] + `="` + next + `"`
 	})
-	content = htmlDoubleSrcPattern.ReplaceAllStringFunc(content, func(match string) string {
-		parts := htmlDoubleSrcPattern.FindStringSubmatch(match)
-		if len(parts) != 2 {
+	content = htmlSingleAttrPattern.ReplaceAllStringFunc(content, func(match string) string {
+		parts := htmlSingleAttrPattern.FindStringSubmatch(match)
+		if len(parts) != 3 {
 			return match
 		}
-		next, ok := movedImageSource(ws, oldID, newID, parts[1])
+		next, ok := movedLinkTarget(ws, oldID, newID, parts[2])
 		if !ok {
 			return match
 		}
-		return `src="` + next + `"`
-	})
-	content = htmlSingleSrcPattern.ReplaceAllStringFunc(content, func(match string) string {
-		parts := htmlSingleSrcPattern.FindStringSubmatch(match)
-		if len(parts) != 2 {
-			return match
-		}
-		next, ok := movedImageSource(ws, oldID, newID, parts[1])
-		if !ok {
-			return match
-		}
-		return `src='` + next + `'`
+		return parts[1] + `='` + next + `'`
 	})
 	return content
 }
 
-func movedImageSource(ws workspace.Workspace, oldID domain.NoteID, newID domain.NoteID, raw string) (string, bool) {
+func movedLinkTarget(ws workspace.Workspace, oldID domain.NoteID, newID domain.NoteID, raw string) (string, bool) {
 	raw = strings.TrimSpace(raw)
 	if raw == "" || isRemoteImageSource(raw) {
 		return raw, false
