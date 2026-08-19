@@ -189,3 +189,41 @@ func TestMCPGetDeclinesStream(t *testing.T) {
 		t.Fatalf("GET /mcp Allow header: got %q want POST", allow)
 	}
 }
+
+// TestMCPRejectsCrossOriginBrowserRequest covers the CSRF vector CORS does not
+// close: a page can POST a JSON-RPC body as CORS-simple text/plain, which skips
+// preflight, so the tool call runs even though the browser hides the response.
+// Under trust-all the actor is admin, which would reach the write tools.
+func TestMCPRejectsCrossOriginBrowserRequest(t *testing.T) {
+	ts, _ := newAgentTestServer(t)
+
+	post := func(origin string) int {
+		req, err := http.NewRequest(http.MethodPost, ts.URL+"/mcp",
+			strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"tools/list"}`))
+		if err != nil {
+			t.Fatalf("new request: %v", err)
+		}
+		req.Header.Set("Content-Type", "text/plain")
+		if origin != "" {
+			req.Header.Set("Origin", origin)
+		}
+		resp, err := ts.Client().Do(req)
+		if err != nil {
+			t.Fatalf("post /mcp: %v", err)
+		}
+		defer resp.Body.Close()
+		return resp.StatusCode
+	}
+
+	if got := post("https://evil.example.com"); got != http.StatusForbidden {
+		t.Fatalf("cross-origin status: got %d want 403", got)
+	}
+	// A non-browser client (agent, curl) sends no Origin and must still work.
+	if got := post(""); got != http.StatusOK {
+		t.Fatalf("no-Origin status: got %d want 200", got)
+	}
+	// The bundled SPA is same-origin and must still work.
+	if got := post(ts.URL); got != http.StatusOK {
+		t.Fatalf("same-origin status: got %d want 200", got)
+	}
+}

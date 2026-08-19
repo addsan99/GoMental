@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"net/url"
 
 	"GoMental/internal/auth"
 )
@@ -36,6 +37,10 @@ const (
 func (s *Server) handleMCP(w http.ResponseWriter, r *http.Request) {
 	if s.mcpServer == nil {
 		writeErrorStatus(w, http.StatusServiceUnavailable, "mcp.unavailable", "mcp endpoint is not configured")
+		return
+	}
+	if !s.mcpOriginAllowed(r) {
+		writeErrorStatus(w, http.StatusForbidden, "mcp.origin_rejected", "cross-origin requests are not accepted on this endpoint")
 		return
 	}
 	actor := actorFrom(r.Context())
@@ -87,6 +92,32 @@ func (s *Server) handleMCP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeMCPJSON(w, resp)
+}
+
+// mcpOriginAllowed reports whether a request carrying a browser Origin may drive
+// the tool surface. CORS alone does not protect this endpoint: a page can send a
+// JSON-RPC body as a CORS-simple text/plain POST, which skips preflight, and
+// while the browser withholds the response the tool call has already run. On a
+// trust-all deployment (the default) the actor is admin, so that reaches the
+// write tools. The MCP transport spec requires validating Origin for exactly
+// this reason.
+//
+// Non-browser clients — coding agents, curl, the CLI — send no Origin and are
+// unaffected. Same-origin requests from the bundled SPA are allowed, as are any
+// origins explicitly configured with --cors-origin.
+func (s *Server) mcpOriginAllowed(r *http.Request) bool {
+	origin := r.Header.Get("Origin")
+	if origin == "" {
+		return true
+	}
+	if s.allowedOrigins[origin] {
+		return true
+	}
+	parsed, err := url.Parse(origin)
+	if err != nil {
+		return false
+	}
+	return parsed.Host == r.Host
 }
 
 // dispatchMCPMessage authorizes and rate-limits a single message, dispatches it
