@@ -307,6 +307,10 @@ function App() {
   const savedFlashTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const articleScrollRef = useRef<HTMLDivElement | null>(null);
   const pendingEditNoteRef = useRef('');
+  // Mirrors settings.noteView.defaultEditMode so the note-load effect can honour
+  // the preference without taking settings as a dependency (which would reload
+  // the open note on every unrelated settings change).
+  const defaultEditModeRef = useRef<'rich' | 'source'>('rich');
   const suggestionRequestRef = useRef(0);
   const reviewedSuggestionDraftRef = useRef('');
 
@@ -609,7 +613,7 @@ function App() {
       setSaveState('saved');
       setNoteVersion(saved.version ?? '');
       setIsEditing(true);
-      setRawMode(false);
+      setRawMode(settings.noteView.defaultEditMode === 'source');
       setActiveTab('note');
       await loadNotes(saved.id);
       setSelectedID(saved.id);
@@ -846,9 +850,11 @@ function App() {
     setDraft('');
     setSavedContent('');
     setSaveState('idle');
-    const shouldOpenEdit = pendingEditNoteRef.current === selectedID;
+    // Both must be non-empty: with no note selected pendingEditNoteRef and
+    // selectedID are both '', which would otherwise open the editor on nothing.
+    const shouldOpenEdit = Boolean(selectedID) && pendingEditNoteRef.current === selectedID;
     setIsEditing(shouldOpenEdit);
-    setRawMode(false);
+    setRawMode(shouldOpenEdit && defaultEditModeRef.current === 'source');
     setBacklinks([]);
     setNoteVersion('');
     setConflictOpen(false);
@@ -881,7 +887,7 @@ function App() {
         if (pendingEditNoteRef.current === noteID) {
           pendingEditNoteRef.current = '';
           setIsEditing(true);
-          setRawMode(false);
+          setRawMode(defaultEditModeRef.current === 'source');
         }
         if (workspace?.root) {
           await SaveUIState({lastWorkspace: workspace.root, lastNote: noteID, theme});
@@ -1738,6 +1744,7 @@ function App() {
   const workspaceReadOnly = Boolean(workspace && currentWorkspaceSettings.accessMode !== 'editable' && currentWorkspaceSettings.accessMode !== 'writableGit');
   const readOnly = info.readOnly === true || workspaceReadOnly;
   readOnlyRef.current = readOnly;
+  defaultEditModeRef.current = settings.noteView.defaultEditMode;
   const showSaveBar = Boolean(selectedNote) && !readOnly;
   const git = info.git ?? null;
   const writableGit = currentWorkspaceSettings.accessMode === 'writableGit' || info.mode === 'writable-git';
