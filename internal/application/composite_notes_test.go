@@ -173,3 +173,67 @@ func TestRenamingANoteKeepsItInItsOwnMember(t *testing.T) {
 		t.Fatalf("moved note is not in the target member: %v", err)
 	}
 }
+
+// On a composite, links resolve inside one member, so inbound repair has to work
+// in the member's local ID space rather than the namespaced one on show.
+func TestMoveNoteRepairsInboundLinksWithinAMember(t *testing.T) {
+	service, alpha, _ := twoMemberCompositeService(t)
+	ctx := context.Background()
+
+	writeNote(t, alpha, "notes/target.md", "---\ntype: term\n---\n\n# Target\n")
+	writeNote(t, alpha, "notes/linker.md", "---\ntype: term\n---\n\n[[notes/target]]\n[rel](target)\n")
+	if _, err := service.Rebuild(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := service.MoveNote(ctx, MoveNoteRequest{ID: "alpha/notes/target", NewID: "alpha/archive/target"}); err != nil {
+		t.Fatalf("move note: %v", err)
+	}
+
+	linker, err := service.ReadNote(ctx, "alpha/notes/linker")
+	if err != nil {
+		t.Fatalf("read linker: %v", err)
+	}
+	// Rewritten targets stay member-local: the "alpha/" prefix is a view of the
+	// composite, not part of what the member's own links address.
+	for _, want := range []string{"[[archive/target]]", "[rel](../archive/target)"} {
+		if !strings.Contains(linker.Content, want) {
+			t.Fatalf("expected %q after move:\n%s", want, linker.Content)
+		}
+	}
+	links, err := service.Backlinks(ctx, "alpha/archive/target")
+	if err != nil {
+		t.Fatalf("backlinks: %v", err)
+	}
+	if len(links) != 2 {
+		t.Fatalf("expected both links repaired, got %#v", links)
+	}
+}
+
+// A move that lands in a different member cannot be repaired: links never
+// resolved across members, so the link is left exactly as the author wrote it.
+func TestMoveNoteAcrossMembersLeavesInboundLinksAlone(t *testing.T) {
+	service, alpha, _ := twoMemberCompositeService(t)
+	ctx := context.Background()
+
+	writeNote(t, alpha, "notes/target.md", "---\ntype: term\n---\n\n# Target\n")
+	writeNote(t, alpha, "notes/linker.md", "---\ntype: term\n---\n\n[[notes/target]]\n")
+	if _, err := service.Rebuild(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	moved, err := service.MoveNote(ctx, MoveNoteRequest{ID: "alpha/notes/target", NewID: "beta/notes/target"})
+	if err != nil {
+		t.Fatalf("move note: %v", err)
+	}
+	if moved.ID != "beta/notes/target" {
+		t.Fatalf("expected the note to land in beta, got %q", moved.ID)
+	}
+	linker, err := service.ReadNote(ctx, "alpha/notes/linker")
+	if err != nil {
+		t.Fatalf("read linker: %v", err)
+	}
+	if !strings.Contains(linker.Content, "[[notes/target]]") {
+		t.Fatalf("cross-member move should not rewrite the link:\n%s", linker.Content)
+	}
+}

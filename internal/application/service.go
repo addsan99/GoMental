@@ -1068,16 +1068,111 @@ func (s *Service) MoveNote(ctx context.Context, req MoveNoteRequest) (NoteDTO, e
 			return NoteDTO{}, appErr("notes.read_failed", "Could not read moved note", err)
 		}
 	}
-	if err := updateIncrementalProjections(ctx, repo, searchIndex, graphStore, s.corpusState(), []domain.NoteID{newID}, []domain.NoteID{oldID}); err != nil {
+	// Links pointing *at* the note break just as surely as the ones it carries,
+	// so follow the backlink index and re-aim them before reprojecting.
+	repaired, err := s.repairInboundLinks(ctx, ws, repo, graphStore, oldID, newID)
+	if err != nil {
+		return NoteDTO{}, err
+	}
+	changed := append([]domain.NoteID{newID}, repaired...)
+	if err := updateIncrementalProjections(ctx, repo, searchIndex, graphStore, s.corpusState(), changed, []domain.NoteID{oldID}); err != nil {
 		return NoteDTO{}, projectionUpdateErr(err)
 	}
 	dto := noteDTO(read)
 	s.emit("note:deleted", map[string]string{"id": string(oldID)})
 	s.emit("note:updated", dto)
-	s.emit("graph:updated", map[string]any{"changed": []string{string(newID)}, "deleted": []string{string(oldID)}})
+	changedIDs := make([]string, 0, len(changed))
+	for _, id := range changed {
+		changedIDs = append(changedIDs, string(id))
+	}
+	s.emit("graph:updated", map[string]any{"changed": changedIDs, "deleted": []string{string(oldID)}})
 	s.markDeleted(oldID)
-	s.markDirty(newID)
+	for _, id := range changed {
+		s.markDirty(id)
+	}
+	for _, id := range repaired {
+		if updated, rerr := repo.Read(ctx, id); rerr == nil {
+			s.emit("note:updated", noteDTO(updated))
+		}
+	}
 	return dto, nil
+}
+
+// repairInboundLinks re-aims links in other notes from oldID to newID and
+// returns the notes it rewrote. The backlink index is the work list, so the cost
+// is proportional to the links that actually broke rather than the corpus.
+//
+// Must run before the projections are refreshed, while the graph still describes
+// the pre-move state.
+func (s *Service) repairInboundLinks(ctx context.Context, ws workspace.Workspace, repo *workspace.FileNoteRepository, graphStore *graph.SQLiteStore, oldID, newID domain.NoteID) ([]domain.NoteID, error) {
+	links, err := graphStore.Backlinks(ctx, oldID)
+	if err != nil {
+		return nil, appErr("notes.move_backlinks_failed", "Could not look up links to the moved note", err)
+	}
+	seen := map[domain.NoteID]struct{}{oldID: {}, newID: {}}
+	sources := make([]domain.NoteID, 0, len(links))
+	for _, link := range links {
+		if _, dup := seen[link.Source]; dup {
+			continue
+		}
+		seen[link.Source] = struct{}{}
+		sources = append(sources, link.Source)
+	}
+	// Stable order keeps lock acquisition deterministic across concurrent moves.
+	sort.Slice(sources, func(i, j int) bool { return sources[i] < sources[j] })
+
+	repaired := make([]domain.NoteID, 0, len(sources))
+	for _, source := range sources {
+		localSource, localOld, localNew, ok := memberLocalIDs(ws, source, oldID, newID)
+		if !ok {
+			// Cross-member on a composite: links never resolved across members,
+			// so there is nothing here that a rewrite could keep working.
+			continue
+		}
+		if err := func() error {
+			unlock := s.lockNote(source)
+			defer unlock()
+			read, err := repo.Read(ctx, source)
+			if err != nil {
+				return err
+			}
+			rewritten, changed := okf.RetargetLinks(localSource, read.Document.Raw, localOld, localNew)
+			if !changed {
+				return nil
+			}
+			read.Document.Raw = rewritten
+			if err := repo.Save(ctx, read); err != nil {
+				return err
+			}
+			repaired = append(repaired, source)
+			return nil
+		}(); err != nil {
+			return nil, appErr("notes.move_rewrite_failed", "Could not update links to the moved note", err)
+		}
+	}
+	return repaired, nil
+}
+
+// memberLocalIDs projects the three IDs into the space their links resolve in.
+// On a composite that is the owning member's local ID space, and every ID must
+// belong to the same member for a rewrite to mean anything.
+func memberLocalIDs(ws workspace.Workspace, source, oldID, newID domain.NoteID) (domain.NoteID, domain.NoteID, domain.NoteID, bool) {
+	if !ws.IsComposite() {
+		return source, oldID, newID, true
+	}
+	sourceMember, localSource, err := ws.MemberForNoteID(source)
+	if err != nil {
+		return "", "", "", false
+	}
+	oldMember, localOld, err := ws.MemberForNoteID(oldID)
+	if err != nil || oldMember.Prefix != sourceMember.Prefix {
+		return "", "", "", false
+	}
+	newMember, localNew, err := ws.MemberForNoteID(newID)
+	if err != nil || newMember.Prefix != sourceMember.Prefix {
+		return "", "", "", false
+	}
+	return localSource, localOld, localNew, true
 }
 
 func (s *Service) Search(ctx context.Context, input SearchQueryDTO) ([]SearchResultDTO, error) {

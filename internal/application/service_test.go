@@ -952,3 +952,87 @@ func workspacePathEqual(left, right string) bool {
 	rightAbs, _ := filepath.Abs(right)
 	return leftAbs == rightAbs
 }
+
+// A move must also repair the links pointing *at* the note. Wiki links resolve
+// from the workspace root and relative Markdown links from the linking note's
+// own directory, so each form needs its own re-aiming.
+func TestServiceMoveNoteRepairsInboundLinks(t *testing.T) {
+	root := t.TempDir()
+	writeNote(t, root, "concepts/alpha.md", "---\ntype: concept\ntitle: Alpha\n---\n\n# Alpha\n")
+	writeNote(t, root, "concepts/alphabet.md", "---\ntype: concept\ntitle: Alphabet\n---\n\n# Alphabet\n")
+	writeNote(t, root, "concepts/sibling.md", "---\ntype: concept\ntitle: Sibling\n---\n\n"+
+		"[rel](alpha)\n"+
+		"[ext](alpha.md)\n"+
+		"[anchored](alpha#intro)\n"+
+		"[titled](alpha \"Alpha note\")\n"+
+		"[other](alphabet)\n")
+	writeNote(t, root, "journal/entry.md", "---\ntype: note\ntitle: Entry\n---\n\n"+
+		"[[concepts/alpha]]\n"+
+		"[[concepts/alpha#intro|Alpha]]\n"+
+		"[[concepts/alphabet]]\n"+
+		"[up](../concepts/alpha)\n"+
+		"[rooted](/concepts/alpha.md)\n"+
+		"![shot](../concepts/alpha.png)\n")
+
+	service := testService(t, nil)
+	ctx := context.Background()
+	if _, err := service.OpenWorkspace(ctx, root); err != nil {
+		t.Fatalf("open workspace: %v", err)
+	}
+	if _, err := service.MoveNote(ctx, MoveNoteRequest{ID: "concepts/alpha", NewID: "archive/2024/alpha"}); err != nil {
+		t.Fatalf("move note: %v", err)
+	}
+
+	sibling, err := service.ReadNote(ctx, "concepts/sibling")
+	if err != nil {
+		t.Fatalf("read sibling: %v", err)
+	}
+	for _, want := range []string{
+		"[rel](../archive/2024/alpha)",
+		"[ext](../archive/2024/alpha.md)",
+		"[anchored](../archive/2024/alpha#intro)",
+		"[titled](../archive/2024/alpha \"Alpha note\")",
+		// A different note whose ID merely shares a prefix must not move.
+		"[other](alphabet)",
+	} {
+		if !strings.Contains(sibling.Content, want) {
+			t.Fatalf("expected %q in sibling after move:\n%s", want, sibling.Content)
+		}
+	}
+
+	entry, err := service.ReadNote(ctx, "journal/entry")
+	if err != nil {
+		t.Fatalf("read entry: %v", err)
+	}
+	for _, want := range []string{
+		"[[archive/2024/alpha]]",
+		"[[archive/2024/alpha#intro|Alpha]]",
+		"[[concepts/alphabet]]",
+		"[up](../archive/2024/alpha)",
+		"[rooted](/archive/2024/alpha.md)",
+		// Images are assets, not note links, and keep their own path.
+		"![shot](../concepts/alpha.png)",
+	} {
+		if !strings.Contains(entry.Content, want) {
+			t.Fatalf("expected %q in entry after move:\n%s", want, entry.Content)
+		}
+	}
+
+	// The repaired links must resolve, i.e. show up as backlinks of the new ID.
+	links, err := service.Backlinks(ctx, "archive/2024/alpha")
+	if err != nil {
+		t.Fatalf("backlinks: %v", err)
+	}
+	sources := map[string]int{}
+	for _, link := range links {
+		sources[link.Source]++
+	}
+	if sources["concepts/sibling"] != 3 {
+		// [rel] and [titled] collapse into one row: the links table is keyed by
+		// (source, target, strength, heading), which they now share.
+		t.Fatalf("expected 3 repaired sibling backlinks, got %d (%#v)", sources["concepts/sibling"], links)
+	}
+	if sources["journal/entry"] != 4 {
+		t.Fatalf("expected 4 repaired entry backlinks, got %d (%#v)", sources["journal/entry"], links)
+	}
+}
