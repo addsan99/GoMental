@@ -10,7 +10,7 @@ export type TreeGroup = {
   notes: application.NoteSummaryDTO[];
 };
 
-export type NoteTreeAction = 'copy' | 'copyPath' | 'rename' | 'delete';
+export type NoteTreeAction = 'copyPath' | 'rename' | 'delete';
 
 type FolderRow = {kind: 'folder'; key: string; name: string; depth: number; count: number; open: boolean};
 type FileRow = {kind: 'file'; key: string; note: application.NoteSummaryDTO; depth: number};
@@ -21,7 +21,7 @@ type MenuState = {id: string; x: number; y: number};
 // Keeps the menu clear of the viewport edge when right-clicking near it. Only
 // needs to be approximate — it is a clamp, not a layout measurement.
 const MENU_WIDTH = 232;
-const MENU_HEIGHT = 150;
+const MENU_HEIGHT = 110;
 
 // Row height in px — must match `.gm-tree-folder` / `.gm-tree-file` height in App.css.
 const ROW_H = 33;
@@ -275,7 +275,6 @@ export default function SidebarNoteTree({
       aria-label="Note actions"
       style={{left: menu.x, top: menu.y}}
     >
-      <TreeMenuItem label="Copy" disabled={!canMutate} onSelect={() => runAction('copy')} />
       <TreeMenuItem label="Copy Full Path" disabled={false} onSelect={() => runAction('copyPath')} />
       <div className="gm-note-context-separator" role="separator" />
       <TreeMenuItem label="Rename…" disabled={!canMutate} onSelect={() => runAction('rename')} />

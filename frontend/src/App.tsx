@@ -1115,25 +1115,6 @@ function App() {
       return;
     }
 
-    if (action === 'copy') {
-      setBusy('Copying note');
-      setError('');
-      try {
-        const source = await ReadNote(id);
-        const copyID = uniqueNoteID(id, notes.map((note) => note.id));
-        const created = await SaveNote({id: copyID, content: source.content});
-        setSelectedID(created.id);
-        await loadNotes(created.id);
-        setGraphRevision((value) => value + 1);
-        showToast('Note copied');
-      } catch (err) {
-        setError(errorMessage(err));
-      } finally {
-        setBusy('');
-      }
-      return;
-    }
-
     if (action === 'rename') {
       const folder = id.includes('/') ? id.slice(0, id.lastIndexOf('/')) : '';
       const nextName = window.prompt(`Rename "${label}" to:`, basename(id));
@@ -3747,20 +3728,6 @@ function normalizeNotePath(path: string): string {
     parts.push(part);
   }
   return parts.join('/');
-}
-
-function uniqueNoteID(id: string, existing: string[]): string {
-  const taken = new Set(existing.map((value) => value.toLocaleLowerCase()));
-  const base = `${id}-copy`;
-  if (!taken.has(base.toLocaleLowerCase())) {
-    return base;
-  }
-  for (let index = 2; ; index += 1) {
-    const candidate = `${base}-${index}`;
-    if (!taken.has(candidate.toLocaleLowerCase())) {
-      return candidate;
-    }
-  }
 }
 
 function groupNotes(notes: application.NoteSummaryDTO[]): TreeGroup[] {
