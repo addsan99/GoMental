@@ -7,6 +7,7 @@ import CommandPalette from './ui/CommandPalette';
 import LinkPicker from './ui/LinkPicker';
 import SidebarNoteTree from './ui/SidebarNoteTree';
 import type {NoteTreeAction} from './ui/SidebarNoteTree';
+import {useNoteActionMenu} from './ui/NoteActionMenu';
 import Toast from './ui/Toast';
 import NoteContextMenu from './ui/NoteContextMenu';
 import DialogHost, {confirmDialog, promptDialog} from './ui/dialogs';
@@ -307,6 +308,9 @@ function App() {
   const historyNavRef = useRef<HTMLDivElement | null>(null);
   const openWorkspaceMenuRef = useRef<HTMLDivElement | null>(null);
   const searchRequestRef = useRef(0);
+  // Query behind the hits currently on screen, so a corpus refresh can rerun it
+  // without clearing the list.
+  const searchedTextRef = useRef('');
   const noteRequestRef = useRef(0);
   const backlinksRequestRef = useRef(0);
   const workspaceEpochRef = useRef(0);
@@ -1255,10 +1259,17 @@ function App() {
       setSearchResults([]);
       setSearchStatus('idle');
       setSearchError('');
+      searchedTextRef.current = '';
       return;
     }
 
-    setSearchStatus('searching');
+    // A refresh triggered by a note mutation reruns the same query, so keep the
+    // current hits on screen instead of flashing "Searching…" over them. A real
+    // query change still shows the searching state, since the old hits no longer
+    // describe what was asked for.
+    if (searchedTextRef.current !== searchText.trim()) {
+      setSearchStatus('searching');
+    }
     setSearchError('');
     const timer = window.setTimeout(() => {
       void (async () => {
@@ -1277,6 +1288,7 @@ function App() {
             return;
           }
           setSearchResults(results);
+          searchedTextRef.current = searchText.trim();
           setSearchStatus('ready');
         } catch (err) {
           if (searchRequestRef.current !== requestID) {
@@ -1290,7 +1302,11 @@ function App() {
     }, 220);
 
     return () => window.clearTimeout(timer);
-  }, [facets.favorites, facetsActive, searchText, workspace]);
+    // graphRevision bumps on every note mutation (create, save, delete, rename,
+    // move, plus server-side note events). Results are a snapshot of the corpus,
+    // so without it a note deleted or renamed from the results list would linger
+    // as a stale row until the query itself changed.
+  }, [facets.favorites, facetsActive, graphRevision, searchText, workspace]);
 
   const handleDraftChange = useCallback((next: string) => {
     setDraft(next);
@@ -2119,6 +2135,8 @@ function App() {
                 onClearFacets={() => setFacets({types: [], tags: [], folders: [], favorites: false})}
                 onOpen={openSearchResult}
                 onToggleFavorite={toggleNoteFavorite}
+                onNoteAction={handleNoteTreeAction}
+                actionsDisabled={readOnly || interactionBusy}
               />
             ) : (
               <SidebarNoteTree
@@ -3561,6 +3579,8 @@ function SearchResultsList({
   onClearFacets,
   onOpen,
   onToggleFavorite,
+  onNoteAction,
+  actionsDisabled,
 }: {
   results: application.SearchResultDTO[];
   status: SearchStatus;
@@ -3570,7 +3590,16 @@ function SearchResultsList({
   onClearFacets: () => void;
   onOpen: (id: string) => void;
   onToggleFavorite: (id: string, favorite: boolean) => void;
+  onNoteAction?: (action: NoteTreeAction, id: string) => void;
+  actionsDisabled?: boolean;
 }) {
+  // Search results are just another view of the same notes, so they carry the
+  // same right-click actions as the tree rather than making them unavailable
+  // whenever a query is active.
+  const {openMenu, element: contextMenu} = useNoteActionMenu({
+    onNoteAction,
+    canMutate: Boolean(onNoteAction) && !actionsDisabled,
+  });
   if (status === 'searching') {
     return <div className="gm-result-label">Searching…</div>;
   }
@@ -3588,7 +3617,7 @@ function SearchResultsList({
         )}
       </div>
       {results.map((result) => (
-        <button type="button" className="gm-result" key={result.id} onClick={() => onOpen(result.id)}>
+        <button type="button" className="gm-result" key={result.id} onClick={() => onOpen(result.id)} onContextMenu={(event) => openMenu(event, result.id)}>
           <div className="gm-result-head">
             <span className="gm-result-title">{result.title || basename(result.id) || result.id}</span>
             <span className="gm-result-path">{result.path || result.id}</span>
@@ -3624,6 +3653,7 @@ function SearchResultsList({
           {filteredOut > 0 ? <>No notes match “{query}” with the active filters.</> : <>No notes match “{query}”.</>}
         </div>
       )}
+      {contextMenu}
     </div>
   );
 }

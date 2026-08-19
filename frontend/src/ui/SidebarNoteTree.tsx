@@ -1,6 +1,8 @@
 import {useEffect, useMemo, useRef, useState} from 'react';
-import type {CSSProperties, DragEvent, MouseEvent as ReactMouseEvent} from 'react';
+import type {CSSProperties, DragEvent} from 'react';
 import {ChevronIcon, FileIcon, FolderIcon, StarIcon} from './icons';
+import {useNoteActionMenu} from './NoteActionMenu';
+import type {NoteTreeAction} from './NoteActionMenu';
 import {basename} from '../util';
 import type {application} from '../../wailsjs/go/models';
 
@@ -10,18 +12,11 @@ export type TreeGroup = {
   notes: application.NoteSummaryDTO[];
 };
 
-export type NoteTreeAction = 'copyPath' | 'rename' | 'delete';
+export type {NoteTreeAction} from './NoteActionMenu';
 
 type FolderRow = {kind: 'folder'; key: string; name: string; depth: number; count: number; open: boolean};
 type FileRow = {kind: 'file'; key: string; note: application.NoteSummaryDTO; depth: number};
 type FlatRow = FolderRow | FileRow;
-
-type MenuState = {id: string; x: number; y: number};
-
-// Keeps the menu clear of the viewport edge when right-clicking near it. Only
-// needs to be approximate — it is a clamp, not a layout measurement.
-const MENU_WIDTH = 232;
-const MENU_HEIGHT = 110;
 
 // Row height in px — must match `.gm-tree-folder` / `.gm-tree-file` height in App.css.
 const ROW_H = 33;
@@ -74,67 +69,19 @@ export default function SidebarNoteTree({
 }) {
   const rows = useMemo(() => flattenTree(tree, expanded), [tree, expanded]);
   const navRef = useRef<HTMLElement | null>(null);
-  const menuRef = useRef<HTMLDivElement | null>(null);
   const [scrollTop, setScrollTop] = useState(0);
   const [viewport, setViewport] = useState(0);
   const [dragNoteID, setDragNoteID] = useState('');
   const [dropFolder, setDropFolder] = useState<string | null>(null);
-  const [menu, setMenu] = useState<MenuState | null>(null);
 
   const virtualize = rows.length > VIRTUALIZE_THRESHOLD;
 
   const canMove = Boolean(onMoveNote) && !moveDisabled;
   // "Copy full path" is a read-only lookup, so the menu stays useful in
   // read-only workspaces even though the mutating entries are disabled there.
-  const canAct = Boolean(onNoteAction);
-  const canMutate = canAct && !moveDisabled;
+  const canMutate = Boolean(onNoteAction) && !moveDisabled;
 
-  // Dismiss on any interaction that would leave the menu stranded, including a
-  // scroll of the tree: the menu is viewport-positioned, so a scrolled row would
-  // otherwise drift away from it.
-  useEffect(() => {
-    if (!menu) {
-      return;
-    }
-    const close = (event: Event) => {
-      if (event.type === 'pointerdown' && menuRef.current?.contains(event.target as Node)) {
-        return;
-      }
-      setMenu(null);
-    };
-    window.addEventListener('pointerdown', close);
-    window.addEventListener('resize', close);
-    window.addEventListener('scroll', close, true);
-    window.addEventListener('keydown', close);
-    return () => {
-      window.removeEventListener('pointerdown', close);
-      window.removeEventListener('resize', close);
-      window.removeEventListener('scroll', close, true);
-      window.removeEventListener('keydown', close);
-    };
-  }, [menu]);
-
-  const openMenu = (event: ReactMouseEvent, id: string) => {
-    if (!canAct) {
-      return;
-    }
-    event.preventDefault();
-    event.stopPropagation();
-    setMenu({
-      id,
-      x: Math.max(8, Math.min(event.clientX, window.innerWidth - MENU_WIDTH - 8)),
-      y: Math.max(8, Math.min(event.clientY, window.innerHeight - MENU_HEIGHT - 8)),
-    });
-  };
-
-  const runAction = (action: NoteTreeAction) => {
-    if (!menu) {
-      return;
-    }
-    const id = menu.id;
-    setMenu(null);
-    onNoteAction?.(action, id);
-  };
+  const {openMenu, element: contextMenu} = useNoteActionMenu({onNoteAction, canMutate});
 
   const handleDragStart = (event: DragEvent, id: string) => {
     if (!canMove) {
@@ -267,21 +214,6 @@ export default function SidebarNoteTree({
     );
   };
 
-  const contextMenu = menu ? (
-    <div
-      ref={menuRef}
-      className={/Mac|iPhone|iPad|iPod/i.test(navigator.userAgent) ? 'gm-note-context-menu gm-note-context-menu--mac' : 'gm-note-context-menu gm-note-context-menu--windows'}
-      role="menu"
-      aria-label="Note actions"
-      style={{left: menu.x, top: menu.y}}
-    >
-      <TreeMenuItem label="Copy Full Path" disabled={false} onSelect={() => runAction('copyPath')} />
-      <div className="gm-note-context-separator" role="separator" />
-      <TreeMenuItem label="Rename…" disabled={!canMutate} onSelect={() => runAction('rename')} />
-      <TreeMenuItem label="Delete…" disabled={!canMutate} onSelect={() => runAction('delete')} />
-    </div>
-  ) : null;
-
   if (!virtualize) {
     return (
       <nav
@@ -322,17 +254,3 @@ export default function SidebarNoteTree({
   );
 }
 
-function TreeMenuItem({label, disabled, onSelect}: {label: string; disabled: boolean; onSelect: () => void}) {
-  return (
-    <button
-      type="button"
-      className="gm-note-context-item"
-      role="menuitem"
-      disabled={disabled}
-      onMouseDown={(event) => event.preventDefault()}
-      onClick={onSelect}
-    >
-      <span>{label}</span>
-    </button>
-  );
-}
