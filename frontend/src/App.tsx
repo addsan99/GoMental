@@ -244,13 +244,22 @@ function App() {
   useEffect(() => {
     const shell = document.querySelector<HTMLElement>('.gm-shell');
     if (!shell) return;
+    // Imported themes are mirrored onto the document element as well so the
+    // portaled MDXEditor popovers (which live outside .gm-shell) pick them up.
+    const root = document.documentElement;
     let cancelled = false;
-    CSS_VARIABLE_NAMES.forEach((key) => shell.style.removeProperty(key));
+    CSS_VARIABLE_NAMES.forEach((key) => {
+      shell.style.removeProperty(key);
+      root.style.removeProperty(key);
+    });
     if (!themeOption(theme)) return;
     const importedTheme = loadVSCodeTheme(theme);
     if (!cancelled && importedTheme) {
       const variables = cssVariablesForTheme(importedTheme);
-      CSS_VARIABLE_NAMES.forEach((key) => shell.style.setProperty(key, variables[key]));
+      CSS_VARIABLE_NAMES.forEach((key) => {
+        shell.style.setProperty(key, variables[key]);
+        root.style.setProperty(key, variables[key]);
+      });
     }
     return () => { cancelled = true; };
   }, [theme]);
@@ -1609,7 +1618,13 @@ function App() {
   );
 
   useEffect(() => {
-    document.documentElement.dataset.theme = theme;
+    // The shell carries the normalised appearance so [data-theme="dark"] rules
+    // match. The document element gets it too because MDXEditor portals its
+    // popovers (table row/column menus, toolbar dropdowns) to document.body,
+    // outside .gm-shell — without this they resolve the light :root tokens.
+    // It must be the appearance, not the raw theme id: an imported theme id like
+    // "nord" matches no selector at all.
+    document.documentElement.dataset.theme = themeAppearance(theme);
     document.documentElement.dataset.accent = 'iris';
     try {
       localStorage.setItem('gm-theme', theme);

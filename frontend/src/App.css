@@ -1008,6 +1008,40 @@ body.gm-resizing * { cursor: col-resize !important; }
   background: var(--accent-soft);
   color: var(--accent-text);
 }
+/* The table row/column menus are Radix popovers portaled into
+   .mdxeditor-popup-container, which sits outside the .mdxeditor subtree carrying
+   the base-scale remap above. Without their own remap they resolve MDXEditor's
+   stock light palette and render dark-on-light. Remapping the scale here fixes
+   every portaled surface, including ones not enumerated above. */
+[data-theme="dark"] .mdxeditor-popup-container {
+  --basePageBg: var(--surface);
+  --baseBg: var(--surface-2);
+  --baseBgSubtle: var(--surface-2);
+  --baseBgHover: var(--surface-2);
+  --baseBgActive: var(--surface-3);
+  --baseText: var(--text);
+  --baseTextContrast: var(--text);
+  --baseBorder: var(--border);
+  --baseBorderHover: var(--border-strong);
+}
+[data-theme="dark"] .mdxeditor-popup-container [class*="_tableColumnEditorPopoverContent"] {
+  background: var(--surface);
+  border-color: var(--border-strong);
+  color: var(--text);
+  box-shadow: var(--shadow-md);
+}
+[data-theme="dark"] .mdxeditor-popup-container [class*="_tableColumnEditorToolbar"] > button {
+  color: var(--text);
+}
+[data-theme="dark"] .mdxeditor-popup-container [class*="_tableColumnEditorToolbar"] > button:hover,
+[data-theme="dark"] .mdxeditor-popup-container [class*="_tableColumnEditorToolbar"] > button:active,
+[data-theme="dark"] .mdxeditor-popup-container [class*="_tableColumnEditorToolbar"] > button[data-state="on"] {
+  background: var(--surface-3);
+  color: var(--text);
+}
+[data-theme="dark"] .mdxeditor-popup-container [class*="_tableColumnEditorToolbar"] [role="separator"] {
+  background: var(--border);
+}
 
 /* ---- Source view ---- */
 .gm-source-scroll { flex: 1; overflow: auto; min-height: 0; background: var(--bg); }
