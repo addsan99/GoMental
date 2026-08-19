@@ -9,6 +9,7 @@ import SidebarNoteTree from './ui/SidebarNoteTree';
 import type {NoteTreeAction} from './ui/SidebarNoteTree';
 import Toast from './ui/Toast';
 import NoteContextMenu from './ui/NoteContextMenu';
+import DialogHost, {confirmDialog, promptDialog} from './ui/dialogs';
 import {MarkdownArticle, frontmatterBlock, parseArticle, slugify} from './ui/MarkdownArticle';
 import type {OutlineEntry} from './ui/MarkdownArticle';
 import FindBar from './ui/FindBar';
@@ -1013,7 +1014,12 @@ function App() {
       return;
     }
     const title = notes.find((note) => note.id === selectedID)?.title || basename(selectedID);
-    if (!window.confirm(`Delete "${title}"?\n\nThis removes the note from disk and updates search and graph projections.`)) {
+    if (!await confirmDialog({
+      title: `Delete “${title}”?`,
+      message: 'This removes the note from disk and updates search and graph projections.',
+      confirmLabel: 'Delete',
+      destructive: true,
+    })) {
       return;
     }
     setBusy('Deleting note');
@@ -1132,7 +1138,12 @@ function App() {
 
     if (action === 'rename') {
       const folder = id.includes('/') ? id.slice(0, id.lastIndexOf('/')) : '';
-      const nextName = window.prompt(`Rename "${label}" to:`, basename(id));
+      const nextName = await promptDialog({
+        title: `Rename “${label}”`,
+        message: 'Enter a new file name. The extension is kept if you omit it.',
+        defaultValue: basename(id),
+        confirmLabel: 'Rename',
+      });
       if (nextName === null) {
         return;
       }
@@ -1165,7 +1176,12 @@ function App() {
       return;
     }
 
-    if (!window.confirm(`Delete "${label}"?\n\nThis removes the note from disk and updates search and graph projections.`)) {
+    if (!await confirmDialog({
+      title: `Delete “${label}”?`,
+      message: 'This removes the note from disk and updates search and graph projections.',
+      confirmLabel: 'Delete',
+      destructive: true,
+    })) {
       return;
     }
     setBusy('Deleting note');
@@ -2731,6 +2747,7 @@ function App() {
         }}
       />
       <Toast message={toastMsg} />
+      <DialogHost />
     </div>
   );
 }
@@ -3071,7 +3088,7 @@ function SettingsModal({
                   <div className="gm-type-manager">
                     <div className="gm-type-manager-toolbar">
                       <button type="button" className="gm-btn gm-btn-sm" onClick={() => setTypeDraft({id: '', label: '', description: '', template: '---\ntype: {{type}}\ntitle: {{titleYaml}}\n---\n\n# {{title}}\n\n', source: 'workspace'})}>New Note Type</button>
-                      <button type="button" className="gm-btn gm-btn-sm gm-btn-ghost" onClick={() => { const content = window.prompt('Paste a Note Type collection YAML.'); if (content?.trim()) { void onImportCollection(content).catch(() => {}); } }}>Import</button>
+                      <button type="button" className="gm-btn gm-btn-sm gm-btn-ghost" onClick={() => { void promptDialog({title: 'Import Note Types', message: 'Paste a Note Type collection YAML.', confirmLabel: 'Import', multiline: true}).then((content) => { if (content?.trim()) { void onImportCollection(content).catch(() => {}); } }); }}>Import</button>
                       <label className="gm-type-manager-select"><span>Note Type</span><select value={typeDraft?.id || ''} onChange={(event) => setTypeDraft(noteTypes.find((type) => type.id === event.target.value) || null)}><option value="">Choose a Note Type</option>{noteTypes.map((type) => <option key={type.id} value={type.id}>{type.label}</option>)}</select></label>
                     </div>
                     <div className="gm-type-manager-editor">
@@ -3082,7 +3099,7 @@ function SettingsModal({
                         <label>Starter Content<textarea value={typeDraft.template} disabled={typeDraft.source === 'builtin'} onChange={(event) => setTypeDraft({...typeDraft, template: event.target.value})} spellCheck={false} /></label>
                         <div className="gm-type-manager-actions">
                           {typeDraft.source !== 'builtin' && <button type="button" className="gm-btn" disabled={typeSaving} onClick={() => { setTypeSaving(true); void onSaveNoteType(typeDraft).then(() => setTypeSaving(false)).catch(() => setTypeSaving(false)); }}>{typeSaving ? 'Saving...' : 'Save Note Type'}</button>}
-                          {typeDraft.source !== 'builtin' && noteTypes.some((type) => type.id === typeDraft.id) && <button type="button" className="gm-btn gm-btn-ghost" disabled={typeSaving} onClick={() => { if (window.confirm(`Remove ${typeDraft.label}? Existing notes retain their original metadata and behave as General until this Note Type is restored.`)) { setTypeSaving(true); void onDeleteNoteType(typeDraft.id).then(() => { setTypeDraft(null); setTypeSaving(false); }).catch(() => setTypeSaving(false)); } }}>Remove Note Type</button>}
+                          {typeDraft.source !== 'builtin' && noteTypes.some((type) => type.id === typeDraft.id) && <button type="button" className="gm-btn gm-btn-ghost" disabled={typeSaving} onClick={() => { void confirmDialog({title: `Remove ${typeDraft.label}?`, message: 'Existing notes retain their original metadata and behave as General until this Note Type is restored.', confirmLabel: 'Remove', destructive: true}).then((ok) => { if (!ok) { return; } setTypeSaving(true); void onDeleteNoteType(typeDraft.id).then(() => { setTypeDraft(null); setTypeSaving(false); }).catch(() => setTypeSaving(false)); }); }}>Remove Note Type</button>}
                         </div>
                       </> : <div className="gm-workspace-empty gm-workspace-empty-large">Choose a type to edit its workspace file.</div>}
                     </div>
