@@ -1579,7 +1579,14 @@ function App() {
   const interactionBusy = Boolean(busy) || projectionActive;
 
   // Parse the current note markdown into the reading-article model.
-  const renderContent = saveState === 'dirty' || saveState === 'conflict' ? draft : savedContent;
+  //
+  // draft is the right source in every save state: it is cleared and repopulated
+  // in lockstep with savedContent when a note loads, and it always holds the
+  // user's latest content otherwise. Falling back to savedContent while a save is
+  // in flight ('saving' is set before the await) redisplayed the pre-save text for
+  // the whole round trip, so leaving the editor showed the old note until the
+  // write landed.
+  const renderContent = draft;
   const article = useMemo(
     () => parseArticle(renderContent, noteSummaryForSelected?.title || basename(selectedID)),
     [renderContent, noteSummaryForSelected?.title, selectedID],
