@@ -151,6 +151,11 @@ export function DeleteNote(id: string): Promise<void> {
   return request(`/api/notes/${encodeID(id)}`, {method: 'DELETE'})
 }
 
+export async function NoteFilePath(id: string): Promise<string> {
+  const result = await request<{path: string}>(`/api/note-path/${encodeID(id)}`)
+  return result.path
+}
+
 export function Search(req: application.SearchQueryDTO): Promise<Array<application.SearchResultDTO>> {
   return request('/api/search', {method: 'POST', ...jsonBody(req)})
 }

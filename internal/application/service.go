@@ -962,6 +962,31 @@ func (s *Service) LoadNoteAssetDataURL(ctx context.Context, req NoteAssetRequest
 	return "data:" + mimeType + ";base64," + base64.StdEncoding.EncodeToString(data), nil
 }
 
+// NoteFilePath returns the absolute on-disk path of a note, for "copy full
+// path" and similar reveal-in-file-manager affordances. Resolution stays in Go
+// because a composite workspace maps each note onto its owning member's root,
+// which the workspace-relative NoteSummaryDTO.Path alone cannot express.
+func (s *Service) NoteFilePath(ctx context.Context, id string) (string, error) {
+	select {
+	case <-ctx.Done():
+		return "", ctx.Err()
+	default:
+	}
+	ws, err := s.workspaceSnapshot()
+	if err != nil {
+		return "", err
+	}
+	noteID, err := ws.NormalizeNoteID(id)
+	if err != nil {
+		return "", appErr("notes.invalid_id", "Invalid note id", err)
+	}
+	path, err := ws.PathForNoteID(noteID)
+	if err != nil {
+		return "", appErr("notes.path_failed", "Could not resolve the note path", err)
+	}
+	return path, nil
+}
+
 func (s *Service) DeleteNote(ctx context.Context, id string) error {
 	noteID := domain.NoteID(id)
 	if ws, wsErr := s.workspaceSnapshot(); wsErr == nil {

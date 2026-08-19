@@ -230,6 +230,17 @@ func (s *Server) handleMoveNote(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, note)
 }
 
+// GET /api/note-path/{id...} — its own prefix rather than /api/notes/path/...,
+// which would shadow a note actually stored under a "path" folder.
+func (s *Server) handleNoteFilePath(w http.ResponseWriter, r *http.Request) {
+	path, err := s.service().NoteFilePath(r.Context(), r.PathValue("id"))
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"path": path})
+}
+
 // POST /api/import — SSRF-guarded before the core fetch.
 func (s *Server) handleImport(w http.ResponseWriter, r *http.Request) {
 	var req application.ImportURLRequest

@@ -77,6 +77,18 @@ export function MoveNote(req: MoveNoteRequest): Promise<NoteDTOWithVersion> {
   return MoveNoteBinding(req)
 }
 
+// Called dynamically rather than through the generated bindings so the checked-in
+// build order keeps working: `npm run typecheck` runs before `wails build`
+// regenerates ../../wailsjs, so a static import of a newly added method would
+// fail type-checking on any checkout whose bindings predate it.
+export function NoteFilePath(id: string): Promise<string> {
+  const app = (window as any)?.go?.main?.App
+  if (!app || typeof app.NoteFilePath !== 'function') {
+    return Promise.reject(new Error('note paths are not available in this build'))
+  }
+  return app.NoteFilePath(id)
+}
+
 // GitSync is only bound in viewer git mode. It is called dynamically (not via the
 // generated bindings) so the generated module does not need regenerating; the
 // desktop default build simply never exposes window.go.main.App.GitSync.

@@ -6,6 +6,7 @@ import type {CodeMirrorEditorHandle} from './CodeMirrorEditor';
 import CommandPalette from './ui/CommandPalette';
 import LinkPicker from './ui/LinkPicker';
 import SidebarNoteTree from './ui/SidebarNoteTree';
+import type {NoteTreeAction} from './ui/SidebarNoteTree';
 import Toast from './ui/Toast';
 import NoteContextMenu from './ui/NoteContextMenu';
 import {MarkdownArticle, frontmatterBlock, parseArticle, slugify} from './ui/MarkdownArticle';
@@ -55,6 +56,7 @@ import {
   LoadSettings,
   LoadUIState,
   MoveNote,
+  NoteFilePath,
   OpenWorkspace,
   ReadNote,
   Rebuild,
@@ -1087,6 +1089,118 @@ function App() {
     }
   }, [busy, info.readOnly, isEditing, loadNotes, notes, projectionActive, selectedID, settings, showToast, workspace]);
 
+  // Context-menu actions from the sidebar tree. These act on the right-clicked
+  // note rather than the selected one, so each resets view state only when the
+  // note it touches happens to be the one on screen.
+  const handleNoteTreeAction = useCallback(async (action: NoteTreeAction, id: string) => {
+    if (!id) {
+      return;
+    }
+    const summary = notes.find((note) => note.id === id);
+    const label = summary?.title || basename(id);
+
+    if (action === 'copyPath') {
+      setError('');
+      try {
+        await navigator.clipboard.writeText(await NoteFilePath(id));
+        showToast('Full path copied');
+      } catch (err) {
+        setError(errorMessage(err));
+      }
+      return;
+    }
+
+    const writable = !info.readOnly && !workspaceIsReadOnly(settings, workspace?.root || '') && !busy && !projectionActive;
+    if (!writable) {
+      return;
+    }
+
+    if (action === 'copy') {
+      setBusy('Copying note');
+      setError('');
+      try {
+        const source = await ReadNote(id);
+        const copyID = uniqueNoteID(id, notes.map((note) => note.id));
+        const created = await SaveNote({id: copyID, content: source.content});
+        setSelectedID(created.id);
+        await loadNotes(created.id);
+        setGraphRevision((value) => value + 1);
+        showToast('Note copied');
+      } catch (err) {
+        setError(errorMessage(err));
+      } finally {
+        setBusy('');
+      }
+      return;
+    }
+
+    if (action === 'rename') {
+      const folder = id.includes('/') ? id.slice(0, id.lastIndexOf('/')) : '';
+      const nextName = window.prompt(`Rename "${label}" to:`, basename(id));
+      if (nextName === null) {
+        return;
+      }
+      const cleanName = nextName.trim().replace(/^\/+|\/+$/g, '');
+      if (!cleanName || cleanName === basename(id)) {
+        return;
+      }
+      const nextID = folder ? `${folder}/${cleanName}` : cleanName;
+      if (notes.some((note) => note.id.toLocaleLowerCase() === nextID.toLocaleLowerCase())) {
+        setError(`A note already exists at ${nextID}.`);
+        return;
+      }
+      setBusy('Renaming note');
+      setError('');
+      try {
+        const moved = await MoveNote({id, newId: nextID});
+        if (selectedID === id) {
+          pendingEditNoteRef.current = isEditing ? moved.id : '';
+          setSelectedID(moved.id);
+        }
+        setDeletedNotice('');
+        await loadNotes(selectedID === id ? moved.id : selectedID);
+        setGraphRevision((value) => value + 1);
+        showToast('Note renamed');
+      } catch (err) {
+        setError(errorMessage(err));
+      } finally {
+        setBusy('');
+      }
+      return;
+    }
+
+    if (!window.confirm(`Delete "${label}"?\n\nThis removes the note from disk and updates search and graph projections.`)) {
+      return;
+    }
+    setBusy('Deleting note');
+    setError('');
+    try {
+      await DeleteNote(id);
+      let nextID = selectedID;
+      if (selectedID === id) {
+        nextID = notes.find((note) => note.id !== id)?.id || '';
+        setSelectedID(nextID);
+        setSelectedNote(null);
+        setDraft('');
+        setSavedContent('');
+        setSaveState('idle');
+        setIsEditing(false);
+        setRawMode(false);
+        setBacklinks([]);
+        setNoteVersion('');
+        setActiveTab('note');
+        setDeletedNotice('');
+      }
+      await loadNotes(nextID);
+      setGraphRevision((value) => value + 1);
+      showToast('Note deleted');
+    } catch (err) {
+      setError(errorMessage(err));
+    } finally {
+      setBusy('');
+    }
+  }, [busy, info.readOnly, isEditing, loadNotes, notes, projectionActive, selectedID, settings, showToast, workspace?.root]);
+
   const reloadFromServer = useCallback(async () => {
     if (!selectedID) {
       return;
@@ -1990,6 +2104,7 @@ function App() {
                 onToggleFolder={toggleFolder}
                 onToggleFavorite={toggleNoteFavorite}
                 onMoveNote={moveNoteToFolder}
+                onNoteAction={handleNoteTreeAction}
                 moveDisabled={readOnly || interactionBusy}
               />
             )}
@@ -3632,6 +3747,20 @@ function normalizeNotePath(path: string): string {
     parts.push(part);
   }
   return parts.join('/');
+}
+
+function uniqueNoteID(id: string, existing: string[]): string {
+  const taken = new Set(existing.map((value) => value.toLocaleLowerCase()));
+  const base = `${id}-copy`;
+  if (!taken.has(base.toLocaleLowerCase())) {
+    return base;
+  }
+  for (let index = 2; ; index += 1) {
+    const candidate = `${base}-${index}`;
+    if (!taken.has(candidate.toLocaleLowerCase())) {
+      return candidate;
+    }
+  }
 }
 
 function groupNotes(notes: application.NoteSummaryDTO[]): TreeGroup[] {

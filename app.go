@@ -431,6 +431,12 @@ func (a *App) LoadNoteAssetDataURL(req application.NoteAssetRequest) (string, er
 	return a.service().LoadNoteAssetDataURL(a.context(), req)
 }
 
+// NoteFilePath is a read-only lookup, so it stays available in read-only and
+// viewer builds where the write-guarded note operations are blocked.
+func (a *App) NoteFilePath(id string) (string, error) {
+	return a.service().NoteFilePath(a.context(), id)
+}
+
 func (a *App) DeleteNote(id string) error {
 	if a.writesBlocked() {
 		return errReadOnly

@@ -33,6 +33,7 @@ export const LoadUIState = impl.LoadUIState
 export const LoadSettings = impl.LoadSettings
 export const MoveNote = impl.MoveNote
 export const Neighborhood = impl.Neighborhood
+export const NoteFilePath = impl.NoteFilePath
 export const OpenWorkspace = impl.OpenWorkspace
 export const ReadNote = impl.ReadNote
 export const Rebuild = impl.Rebuild

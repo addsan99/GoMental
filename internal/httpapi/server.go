@@ -155,6 +155,9 @@ func (s *Server) buildHandler() http.Handler {
 	mux.HandleFunc("PUT /api/notes/{id...}", s.gate(auth.RoleEditor, s.contentWrite(s.handleSaveNote)))
 	mux.HandleFunc("PUT /api/notes/favorite", s.gate(auth.RoleEditor, s.contentWrite(s.handleSetNoteFavorite)))
 	mux.HandleFunc("DELETE /api/notes/{id...}", s.gate(auth.RoleEditor, s.contentWrite(s.handleDeleteNote)))
+	// Viewer-level: WorkspaceDTO.Root is already visible to viewers, so the
+	// absolute note path discloses nothing new about the host layout.
+	mux.HandleFunc("GET /api/note-path/{id...}", s.gate(auth.RoleViewer, s.handleNoteFilePath))
 	mux.HandleFunc("POST /api/import", s.gate(auth.RoleEditor, s.contentWrite(s.handleImport)))
 	mux.HandleFunc("POST /api/assets/{id...}", s.gate(auth.RoleEditor, s.contentWrite(s.handleSaveAsset)))
 	mux.HandleFunc("GET /api/assets/{id...}", s.gate(auth.RoleViewer, s.handleLoadAsset))
