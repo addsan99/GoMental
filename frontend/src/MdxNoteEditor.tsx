@@ -1,13 +1,17 @@
 import {forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState} from 'react';
-import type {ChangeEvent, MouseEvent} from 'react';
+import type {ChangeEvent, MouseEvent, ReactNode} from 'react';
 import {
+  activeEditor$,
   BlockTypeSelect,
   BoldItalicUnderlineToggles,
   ButtonWithTooltip,
+  ChangeCodeMirrorLanguage,
   codeBlockPlugin,
   codeMirrorPlugin,
+  ConditionalContents,
   headingsPlugin,
   imagePlugin,
+  InsertCodeBlock,
   InsertTable,
   linkPlugin,
   listsPlugin,
@@ -18,11 +22,13 @@ import {
   tablePlugin,
   thematicBreakPlugin,
   toolbarPlugin,
+  useCellValue,
   type MDXEditorMethods,
 } from '@mdxeditor/editor';
 import '@mdxeditor/editor/style.css';
+import {$getSelection, $isRangeSelection} from 'lexical';
 import {LoadNoteAssetDataURL} from './transport';
-import {ImageIcon, LinkIcon} from './ui/icons';
+import {CheckIcon, CloseIcon, ImageIcon, LinkIcon} from './ui/icons';
 
 type SavedEditorImage = {
   path: string;
@@ -136,18 +142,40 @@ const MdxNoteEditor = forwardRef<MdxNoteEditorHandle, MdxNoteEditorProps>(functi
     toolbarPlugin({
       toolbarClassName: 'mdx-note-toolbar',
       toolbarContents: () => (
-        <>
-          <BlockTypeSelect />
-          <BoldItalicUnderlineToggles options={['Bold', 'Italic', 'Underline']} />
-          <Separator />
-          <ButtonWithTooltip title="Link to a note (⌘L)" onClick={() => onRequestLinkRef.current?.()}>
-            <LinkIcon size={18} />
-          </ButtonWithTooltip>
-          <ButtonWithTooltip title="Insert image" onClick={() => imageInputRef.current?.click()}>
-            <ImageIcon size={18} />
-          </ButtonWithTooltip>
-          <InsertTable />
-        </>
+        <ConditionalContents
+          options={[
+            {
+              // Inside a fenced block the only useful control is the language
+              // picker; the formatting toggles would act on the code text.
+              when: (editor) => editor?.editorType === 'codeblock',
+              contents: () => <ChangeCodeMirrorLanguage />,
+            },
+            {
+              fallback: () => (
+                <>
+                  <BlockTypeSelect />
+                  <BoldItalicUnderlineToggles options={['Bold', 'Italic', 'Underline']} />
+                  <Separator />
+                  <ButtonWithTooltip title="Link to a note (⌘L)" onClick={() => onRequestLinkRef.current?.()}>
+                    <LinkIcon size={18} />
+                  </ButtonWithTooltip>
+                  <ButtonWithTooltip title="Insert image" onClick={() => imageInputRef.current?.click()}>
+                    <ImageIcon size={18} />
+                  </ButtonWithTooltip>
+                  <InsertTable />
+                  <InsertCodeBlock />
+                  <Separator />
+                  <InsertCharacterButton title="Insert check mark (✓)" character="✓">
+                    <CheckIcon size={18} />
+                  </InsertCharacterButton>
+                  <InsertCharacterButton title="Insert cross mark (✗)" character="✗">
+                    <CloseIcon size={18} />
+                  </InsertCharacterButton>
+                </>
+              ),
+            },
+          ]}
+        />
       ),
     }),
     headingsPlugin(),
@@ -227,6 +255,29 @@ const MdxNoteEditor = forwardRef<MdxNoteEditorHandle, MdxNoteEditorProps>(functi
     </article>
   );
 });
+
+// Inserts a literal character at the caret. Deliberately not `insertMarkdown`:
+// that imports the text as a block and splits the surrounding paragraph, while
+// a check/cross mark is inline content.
+function InsertCharacterButton({title, character, children}: {title: string; character: string; children: ReactNode}) {
+  const editor = useCellValue(activeEditor$);
+  return (
+    <ButtonWithTooltip
+      title={title}
+      onClick={() => {
+        editor?.update(() => {
+          const selection = $getSelection();
+          if ($isRangeSelection(selection)) {
+            selection.insertText(character);
+          }
+        });
+        editor?.focus();
+      }}
+    >
+      {children}
+    </ButtonWithTooltip>
+  );
+}
 
 type MetadataLine =
   | {kind: 'field'; key: string; value: string}

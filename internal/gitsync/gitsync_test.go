@@ -22,6 +22,7 @@ func git(t *testing.T, dir string, args ...string) string {
 		"-c", "user.name=GoMental Test",
 		"-c", "commit.gpgsign=false",
 		"-c", "init.defaultBranch=main",
+		"-c", "safe.bareRepository=all",
 	}, args...)
 	cmd := exec.Command("git", full...)
 	if dir != "" {

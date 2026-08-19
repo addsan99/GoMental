@@ -185,3 +185,113 @@ func TestQueryFullGraphIncludesIsolatedNotes(t *testing.T) {
 		t.Fatalf("expected path-scoped notes, got %#v", scoped.Nodes)
 	}
 }
+
+// A negative depth means "no hop limit": the seed still focuses the view, but
+// the selection covers every note, including ones the seed cannot reach at all.
+// Metadata predicates still apply, since unbounded only removes the hop bound.
+func TestQueryUnboundedDepthSelectsEveryNote(t *testing.T) {
+	store := openStore(t, filepath.Join(t.TempDir(), "graph.sqlite"))
+	ctx := context.Background()
+
+	// A chain alpha -> beta -> gamma, plus an island with no path to the seed.
+	beta := domain.NoteID("beta")
+	gamma := domain.NoteID("gamma")
+	if err := store.ReplaceOutgoingLinks(ctx, "alpha", []domain.NoteLink{{Target: "beta", ResolvedID: &beta, Strength: domain.LinkStrengthHard}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.ReplaceOutgoingLinks(ctx, "beta", []domain.NoteLink{{Target: "gamma", ResolvedID: &gamma, Strength: domain.LinkStrengthHard}}); err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []string{"alpha", "beta", "gamma", "island"} {
+		if err := store.UpsertNoteMeta(ctx, NoteMeta{ID: domain.NoteID(id), Type: "concept"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// Depth 1 stops at the seed's immediate neighbour.
+	shallow, err := store.Query(ctx, domain.GraphQuery{Seed: idPtr("alpha"), Depth: 1})
+	if err != nil {
+		t.Fatalf("query: %v", err)
+	}
+	if hasNode(shallow, "gamma") || hasNode(shallow, "island") {
+		t.Fatalf("depth 1 should stop at beta, got %#v", shallow.Nodes)
+	}
+
+	// Unbounded reaches the far end of the chain and the disconnected island.
+	full, err := store.Query(ctx, domain.GraphQuery{Seed: idPtr("alpha"), Depth: domain.GraphDepthUnbounded})
+	if err != nil {
+		t.Fatalf("query: %v", err)
+	}
+	for _, id := range []string{"alpha", "beta", "gamma", "island"} {
+		if !hasNode(full, id) {
+			t.Fatalf("unbounded depth should include %q, got %#v", id, full.Nodes)
+		}
+	}
+
+	// The hop bound is the only thing dropped — predicates still narrow the set.
+	filtered, err := store.Query(ctx, domain.GraphQuery{Seed: idPtr("alpha"), Depth: domain.GraphDepthUnbounded, Types: []string{"other"}})
+	if err != nil {
+		t.Fatalf("query: %v", err)
+	}
+	if len(filtered.Nodes) != 0 {
+		t.Fatalf("type predicate should still apply when unbounded, got %#v", filtered.Nodes)
+	}
+}
+
+// A shared-heading hub joined to a single note states nothing the note did not
+// already state, and per-heading hubs are numerous enough to swamp the notes in
+// the node count, so they are dropped. Tag and type hubs are a small curated
+// vocabulary the user filters on, so they survive at any size.
+func TestQueryDropsHeadingHubsWithASingleMember(t *testing.T) {
+	store := openStore(t, filepath.Join(t.TempDir(), "graph.sqlite"))
+	ctx := context.Background()
+
+	// alpha and beta share the "Shared" heading; only alpha has "Alpha Only",
+	// and only alpha carries the "solo" tag.
+	alpha := metaNote("alpha", "concept", []domain.Tag{"go", "solo"}, []string{"Shared", "Alpha Only"})
+	betaNote := metaNote("beta", "concept", []domain.Tag{"go"}, []string{"Shared"})
+	if err := store.ReplaceMetadataLinks(ctx, "alpha", MetadataMemberships(alpha)); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.ReplaceMetadataLinks(ctx, "beta", MetadataMemberships(betaNote)); err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []string{"alpha", "beta"} {
+		if err := store.UpsertNoteMeta(ctx, NoteMeta{ID: domain.NoteID(id), Type: "concept"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	g, err := store.Query(ctx, domain.GraphQuery{IncludeMetadataLinks: true})
+	if err != nil {
+		t.Fatalf("query: %v", err)
+	}
+	if !hasNode(g, "heading:shared") {
+		t.Fatalf("a heading hub shared by two notes should survive, got %#v", g.Nodes)
+	}
+	if hasNode(g, "heading:alpha only") {
+		t.Fatalf("a heading hub with one member should be dropped, got %#v", g.Nodes)
+	}
+	if !hasNode(g, "tag:solo") {
+		t.Fatalf("a single-member tag hub is a facet and should survive, got %#v", g.Nodes)
+	}
+	// No edge may point at a hub that is no longer part of the node set.
+	ids := map[string]struct{}{}
+	for _, n := range g.Nodes {
+		ids[n.ID] = struct{}{}
+	}
+	for _, e := range g.Edges {
+		if _, ok := ids[e.Target]; !ok {
+			t.Fatalf("edge %s points at a pruned node %s", e.ID, e.Target)
+		}
+	}
+
+	// Seeding a hub is an explicit request for it, so it is kept regardless.
+	seeded, err := store.Query(ctx, domain.GraphQuery{MetadataSeed: "heading:alpha only", Depth: 1, IncludeMetadataLinks: true})
+	if err != nil {
+		t.Fatalf("query: %v", err)
+	}
+	if !hasNode(seeded, "heading:alpha only") {
+		t.Fatalf("an explicitly seeded hub should survive, got %#v", seeded.Nodes)
+	}
+}

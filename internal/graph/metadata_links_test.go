@@ -164,6 +164,22 @@ func TestGraphReadsHideStoredTitleHeadingHub(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
+	// A second note under the same section heading, hard-linked so it falls
+	// inside the seeded neighborhood below. Without it the hub would have a
+	// single member and be pruned as noise, which is a different rule than the
+	// title-hub suppression under test here.
+	if err := store.UpsertNoteMeta(ctx, NoteMeta{ID: "chicken-cutlet", Title: "Chicken Cutlet"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.ReplaceMetadataLinks(ctx, "chicken-cutlet", []MetadataMembership{
+		{Strength: domain.LinkStrengthHeading, HubKey: "heading:ingredients"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	cutlet := domain.NoteID("chicken-cutlet")
+	if err := store.ReplaceOutgoingLinks(ctx, "israeli-style-schnitzel", []domain.NoteLink{{Target: "chicken-cutlet", ResolvedID: &cutlet, Strength: domain.LinkStrengthHard}}); err != nil {
+		t.Fatal(err)
+	}
 
 	full, err := store.FullGraph(ctx, domain.GraphFilter{IncludeMetadataLinks: true})
 	if err != nil {

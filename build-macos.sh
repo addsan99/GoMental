@@ -12,6 +12,15 @@ if [ "$(uname -s)" != "Darwin" ]; then
   exit 1
 fi
 
+# IDEs and automation may not inherit the shell profile that exposes Homebrew
+# tools and Go-installed CLIs.
+for dir in /opt/homebrew/bin /usr/local/bin /usr/bin /bin /usr/sbin /sbin "$HOME/go/bin"; do
+  if [ -d "$dir" ]; then
+    PATH="$PATH:$dir"
+  fi
+done
+export PATH
+
 for tool in go node npm wails xcode-select; do
   if ! command -v "$tool" >/dev/null 2>&1; then
     echo "Build FAILED: ${tool} is not on PATH." >&2

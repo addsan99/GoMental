@@ -22,6 +22,7 @@ type ParsedOKFNote struct {
 	PlainText  string
 	Headings   []Heading
 	Tags       []Tag
+	Aliases    []string
 	Links      []ParsedLink
 	ModifiedAt time.Time
 }

@@ -36,7 +36,8 @@ Either way, the server exposes these tools:
 | `search_wiki` | Full-text search (ranked, highlighted, tag/path filters). **Start here.** |
 | `read_note` | Read a note's full OKF content + a `version` token. |
 | `list_notes` | List notes, optionally by path prefix / tag / **type**. Each result carries its `type`. |
-| `create_note` | Create a note (`create` / `upsert` / `unique` modes). |
+| `create_note` | Create a note (`create` / `upsert` / `unique` modes). Takes an optional `member` on a composite workspace. |
+| `list_workspace_members` | The workspaces a new note can go in. Empty unless the open workspace is a composite. |
 | `edit_note` | Replace content with optimistic concurrency (`base_version`). |
 | `upload_asset` | Upload an image (base64) to a note → returns path + `![alt](path)` to insert with `edit_note`. |
 | `backlinks` | Notes linking *to* a note. |

@@ -7,12 +7,14 @@ import CommandPalette from './ui/CommandPalette';
 import LinkPicker from './ui/LinkPicker';
 import SidebarNoteTree from './ui/SidebarNoteTree';
 import Toast from './ui/Toast';
-import {MarkdownArticle, parseArticle, slugify} from './ui/MarkdownArticle';
+import NoteContextMenu from './ui/NoteContextMenu';
+import {MarkdownArticle, frontmatterBlock, parseArticle, slugify} from './ui/MarkdownArticle';
 import type {OutlineEntry} from './ui/MarkdownArticle';
 import FindBar from './ui/FindBar';
 import {basename, errorMessage} from './util';
 import {FacetFilters, facetMatchesNote, anyFacetActive, folderOf} from './ui/graph/filters';
 import type {FacetFilter, FacetOption} from './ui/graph/filters';
+import {DEPTH_OPTIONS, depthLabel} from './ui/graph/palette';
 import {
   AppMark,
   Wordmark,
@@ -38,6 +40,7 @@ import {
 } from './ui/icons';
 import {
   Backlinks,
+  Composite,
   DeleteNote,
   DeleteNoteType,
   GitMergePullRequest,
@@ -56,6 +59,7 @@ import {
   ReadNote,
   Rebuild,
   RecentWorkspaces,
+  SaveComposite,
   SaveNote,
   SaveNoteType,
   SaveNoteAsset,
@@ -65,10 +69,11 @@ import {
   SuggestLinks,
   SetNoteFavorite,
   SelectWorkspaceDirectory,
+  WorkspaceMembers,
   onEvent,
 } from './transport';
 import type {application} from '../wailsjs/go/models';
-import type {AppInfoWithMode, GoMentalSettings, GoMentalWorkspaceSettings, LinkSuggestion, NoteDTOWithVersion, NoteType} from './transport/types';
+import type {AppInfoWithMode, GoMentalComposite, GoMentalSettings, GoMentalWorkspaceMember, GoMentalWorkspaceSettings, LinkSuggestion, NoteDTOWithVersion, NoteType} from './transport/types';
 import {CSS_VARIABLE_NAMES, cssVariablesForTheme, loadVSCodeTheme} from './themes/vscode';
 import {themeOption, vscodeThemeOptions} from './themes/catalog';
 
@@ -86,6 +91,30 @@ const CodeMirrorEditor = lazy(() => import('./CodeMirrorEditor'));
 function prefetchEditors() {
   void import('./MdxNoteEditor');
   void import('./CodeMirrorEditor');
+}
+
+function isReadingFont(value: unknown): value is GoMentalSettings['appearance']['readingFont'] {
+  return value === 'newsreader' || value === 'open-sans' || value === 'calibri' || value === 'roboto' || value === 'georgia' || value === 'system-serif' || value === 'system-sans';
+}
+
+function readingFontFamily(font: GoMentalSettings['appearance']['readingFont']): string {
+  switch (font) {
+    case 'open-sans':
+      return '"Open Sans Variable", "Open Sans", Arial, sans-serif';
+    case 'calibri':
+      return 'Calibri, "Segoe UI", Arial, sans-serif';
+    case 'roboto':
+      return '"Roboto Variable", Roboto, Arial, sans-serif';
+    case 'georgia':
+      return 'Georgia, "Times New Roman", serif';
+    case 'system-serif':
+      return 'ui-serif, Georgia, "Times New Roman", serif';
+    case 'system-sans':
+      return 'system-ui, -apple-system, "Segoe UI", sans-serif';
+    case 'newsreader':
+    default:
+      return '"Newsreader Variable", Georgia, "Times New Roman", serif';
+  }
 }
 
 type TreeGroup = {
@@ -107,7 +136,7 @@ type SaveState = 'idle' | 'dirty' | 'saving' | 'saved' | 'conflict';
 type SearchStatus = 'idle' | 'searching' | 'ready' | 'error';
 type WorkspaceTab = 'note' | 'graph';
 type ThemeMode = string;
-type SettingsSection = 'appearance' | 'noteView' | 'graphView' | 'workspaceSettings' | 'types';
+type SettingsSection = 'appearance' | 'noteView' | 'graphView' | 'workspaceSettings' | 'composite' | 'types';
 
 // Above this many rendered graph nodes, 3D is auto-disabled: thousands of lit
 // spheres + text sprites orbiting is far heavier than the flat top-down view, and
@@ -117,6 +146,20 @@ const LARGE_GRAPH_3D_MAX = 1200;
 
 // How many recently-visited notes the back/forward history retains.
 const HISTORY_MAX = 15;
+const NOTE_ZOOM_MIN = 0.75;
+const NOTE_ZOOM_MAX = 2;
+const NOTE_ZOOM_STEP = 0.1;
+
+// Step the zoom onto the next multiple of NOTE_ZOOM_STEP rather than adding the
+// step to the current value. The minimum (75%) is not itself a multiple of the
+// step, so plain addition walks a 75/85/95/105% ladder that steps straight over
+// 100%. Snapping to the grid guarantees 100% is always reachable, while the
+// clamp keeps the min and max themselves selectable at the ends.
+function stepNoteZoom(current: number, direction: 1 | -1): number {
+  const steps = current / NOTE_ZOOM_STEP;
+  const next = direction > 0 ? Math.floor(steps + 1e-6) + 1 : Math.ceil(steps - 1e-6) - 1;
+  return clamp(Math.round(next * NOTE_ZOOM_STEP * 100) / 100, NOTE_ZOOM_MIN, NOTE_ZOOM_MAX);
+}
 
 const emptyInfo: AppInfoWithMode = {
   name: 'GoMental',
@@ -128,6 +171,8 @@ const DEFAULT_SETTINGS: GoMentalSettings = {
   version: 3,
   appearance: {
     theme: 'dark',
+    readingFont: 'newsreader',
+    defaultZoom: 1,
   },
   noteView: {
     defaultEditMode: 'rich',
@@ -168,6 +213,10 @@ function App() {
   const [noteTypes, setNoteTypes] = useState<NoteType[]>([]);
   const [newNoteTitle, setNewNoteTitle] = useState('');
   const [newNoteID, setNewNoteID] = useState('');
+  // Composite workspaces span several member workspaces, so a new note needs a
+  // destination. Empty for an ordinary workspace, which owns its own files.
+  const [workspaceMembers, setWorkspaceMembers] = useState<GoMentalWorkspaceMember[]>([]);
+  const [newNoteMember, setNewNoteMember] = useState('');
   const [importOpen, setImportOpen] = useState(false);
   const [importURL, setImportURL] = useState('');
   const [searchText, setSearchText] = useState('');
@@ -206,6 +255,9 @@ function App() {
   // Facet selection (Types / Tags / Folders), owned here and shared by the right-rail
   // filter panel, the note-list tree (hides non-matches), and both graph instances.
   const [facets, setFacets] = useState<FacetFilter>({types: [], tags: [], folders: [], favorites: false});
+  // Declared here rather than beside the note-list filter below because the
+  // search effect reads it too, and hook dependency arrays evaluate in order.
+  const facetsActive = anyFacetActive(facets);
   // Browser-style visit history of note IDs. Every selection path funnels through
   // setSelectedID, so a single effect records history; back/forward/dropdown jumps
   // set suppressHistoryRef to avoid re-recording the entry they navigate to. Stack
@@ -229,6 +281,7 @@ function App() {
   const [toastMsg, setToastMsg] = useState('');
   const [activeAnchor, setActiveAnchor] = useState('');
   const [graphStats, setGraphStats] = useState<{notes: number; links: number}>({notes: 0, links: 0});
+  const [noteZoom, setNoteZoom] = useState(1);
 
   // Resizable left pane (persisted) + collapsible right rail (persisted).
   const [sidebarWidth, setSidebarWidth] = useState<number>(() => readStoredSidebarWidth());
@@ -236,6 +289,9 @@ function App() {
 
   const mdxEditorRef = useRef<MdxNoteEditorHandle | null>(null);
   const codeMirrorRef = useRef<CodeMirrorEditorHandle | null>(null);
+  // Read-only is derived far below (it needs the workspace settings), but the
+  // source toggle is declared up here, so mirror it into a ref.
+  const readOnlyRef = useRef(false);
   const historyNavRef = useRef<HTMLDivElement | null>(null);
   const openWorkspaceMenuRef = useRef<HTMLDivElement | null>(null);
   const searchRequestRef = useRef(0);
@@ -260,10 +316,48 @@ function App() {
     toastTimerRef.current = setTimeout(() => setToastMsg(''), 1900);
   }, []);
 
+  const zoomInNote = useCallback(() => {
+    setNoteZoom((current) => stepNoteZoom(current, 1));
+  }, []);
+  const zoomOutNote = useCallback(() => {
+    setNoteZoom((current) => stepNoteZoom(current, -1));
+  }, []);
+  const resetNoteZoom = useCallback(() => setNoteZoom(settings.appearance.defaultZoom), [settings.appearance.defaultZoom]);
+
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (
+        activeTab !== 'note' ||
+        !selectedNote ||
+        !(event.metaKey || event.ctrlKey) ||
+        event.altKey
+      ) {
+        return;
+      }
+      const target = event.target;
+      if (target instanceof HTMLElement && target.closest('input, textarea, [contenteditable="true"]')) {
+        return;
+      }
+      if (event.key === '+' || event.key === '=') {
+        event.preventDefault();
+        zoomInNote();
+      } else if (event.key === '-' || event.key === '_') {
+        event.preventDefault();
+        zoomOutNote();
+      } else if (event.key === '0') {
+        event.preventDefault();
+        resetNoteZoom();
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [activeTab, resetNoteZoom, selectedNote, zoomInNote, zoomOutNote]);
+
   const applySettingsToUI = useCallback((next: GoMentalSettings) => {
     const normalized = normalizeSettings(next);
     setSettings(normalized);
     setTheme(normalized.appearance.theme);
+    setNoteZoom(normalized.appearance.defaultZoom);
     setGraphMode(normalized.graphView.defaultMode);
     setGraphDepth(normalized.graphView.defaultDepth);
   }, []);
@@ -448,6 +542,32 @@ function App() {
     }
   }, [loadNotes, projectionActive, selectedID, showToast]);
 
+  useEffect(() => {
+    let cancelled = false;
+    if (!workspace) {
+      setWorkspaceMembers([]);
+      setNewNoteMember('');
+      return;
+    }
+    void WorkspaceMembers()
+      .then((members) => {
+        if (cancelled) {
+          return;
+        }
+        setWorkspaceMembers(members || []);
+        setNewNoteMember((current) => (members || []).some((member) => member.prefix === current)
+          ? current
+          : (members || [])[0]?.prefix || '');
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setWorkspaceMembers([]);
+          setNewNoteMember('');
+        }
+      });
+    return () => { cancelled = true; };
+  }, [workspace?.root]);
+
   const createNote = useCallback(async () => {
     if (!workspace || busy || info.readOnly || workspaceIsReadOnly(settings, workspace.root)) {
       return;
@@ -458,8 +578,12 @@ function App() {
       setError('Enter a note title or note ID.');
       return;
     }
-    if (notes.some((note) => note.id.toLocaleLowerCase() === id.toLocaleLowerCase())) {
-      setError(`A note already exists at ${id}.`);
+    // On a composite the note lands inside a member, so the collision check has
+    // to be against the id the note will actually have, not the bare one typed.
+    const member = workspaceMembers.some((entry) => entry.prefix === newNoteMember) ? newNoteMember : '';
+    const qualifiedID = member ? `${member}/${id}` : id;
+    if (notes.some((note) => note.id.toLocaleLowerCase() === qualifiedID.toLocaleLowerCase())) {
+      setError(`A note already exists at ${qualifiedID}.`);
       return;
     }
     setBusy('Creating note');
@@ -471,7 +595,7 @@ function App() {
         return;
       }
       const content = renderNoteTypeStarterContent(noteType, title || basename(id), id);
-      const saved = await SaveNote({id, content});
+      const saved = await SaveNote({id, content, member});
       pendingEditNoteRef.current = saved.id;
       setNewNoteOpen(false);
       setNewNoteTemplate(noteType.id);
@@ -494,7 +618,7 @@ function App() {
     } finally {
       setBusy('');
     }
-  }, [busy, info.readOnly, loadNotes, newNoteID, newNoteTemplate, newNoteTitle, noteTypes, notes, settings, showToast, theme, workspace]);
+  }, [busy, info.readOnly, loadNotes, newNoteID, newNoteMember, newNoteTemplate, newNoteTitle, noteTypes, notes, settings, showToast, theme, workspace, workspaceMembers]);
 
   const importFromURL = useCallback(async () => {
     if (!workspace || busy || info.readOnly || workspaceIsReadOnly(settings, workspace.root)) {
@@ -508,7 +632,8 @@ function App() {
     setBusy('Importing URL');
     setError('');
     try {
-      const saved = await ImportURL({url});
+      const member = workspaceMembers.some((entry) => entry.prefix === newNoteMember) ? newNoteMember : '';
+      const saved = await ImportURL({url, member});
       setImportOpen(false);
       setImportURL('');
       setSelectedNote(saved);
@@ -528,7 +653,7 @@ function App() {
     } finally {
       setBusy('');
     }
-  }, [busy, importURL, info.readOnly, loadNotes, settings, showToast, theme, workspace]);
+  }, [busy, importURL, info.readOnly, loadNotes, newNoteMember, settings, showToast, theme, workspace, workspaceMembers]);
 
   useEffect(() => {
     const offProgress = onEvent('index:progress', (payload: RebuildProgress) => {
@@ -1017,7 +1142,10 @@ function App() {
             tags: [],
             pathPrefix: '',
             favoritesOnly: facets.favorites,
-            limit: 50,
+            // Facets are applied to the returned hits rather than pushed into the
+            // query, so ask for a deeper slice when they are on: otherwise the
+            // cut happens before the filter and thins the list out too far.
+            limit: facetsActive ? 250 : 50,
           });
           if (searchRequestRef.current !== requestID) {
             return;
@@ -1036,7 +1164,7 @@ function App() {
     }, 220);
 
     return () => window.clearTimeout(timer);
-  }, [facets.favorites, searchText, workspace]);
+  }, [facets.favorites, facetsActive, searchText, workspace]);
 
   const handleDraftChange = useCallback((next: string) => {
     setDraft(next);
@@ -1219,9 +1347,15 @@ function App() {
   // Toggle between rich (WYSIWYG) and raw markdown (CodeMirror) while editing.
   // The draft is shared between both editors (handleDraftChange), so flipping
   // preserves in-progress content. isEditing stays true throughout.
+  //
+  // In a read-only workspace the same toggle opens the source as a viewer: the
+  // markdown, its YAML frontmatter and anything else the renderer does not show
+  // are still worth reading, so only editing is withheld, not looking.
   const toggleSourceMode = useCallback(() => {
     setActiveTab('note');
-    setIsEditing(true);
+    if (!readOnlyRef.current) {
+      setIsEditing(true);
+    }
     setRawMode((current) => !current);
   }, []);
 
@@ -1263,7 +1397,12 @@ function App() {
     }
     const el = container.querySelector<HTMLElement>(`[data-anchor="${anchor}"]`);
     if (el) {
-      container.scrollTo({top: el.offsetTop - 16, behavior: 'smooth'});
+      // The article sits inside a CSS `zoom` wrapper, so offsetTop reports the
+      // heading's position in unscaled layout pixels while scrollTop is in the
+      // container's own (scaled) pixels — scrolling to it under- or overshoots by
+      // the zoom factor. Measuring both rects keeps the two in the same space.
+      const top = el.getBoundingClientRect().top - container.getBoundingClientRect().top + container.scrollTop - 16;
+      container.scrollTo({top: Math.max(0, top), behavior: 'smooth'});
       setActiveAnchor(anchor);
     }
   }, []);
@@ -1293,8 +1432,8 @@ function App() {
   }, [notes]);
 
   // When any facet is active the note list hides non-matches (user choice); the
-  // graph is filtered separately via the same facets prop.
-  const facetsActive = anyFacetActive(facets);
+  // graph is filtered separately via the same facets prop. `facetsActive` is
+  // declared with the facet state above, since the search effect depends on it.
   const visibleNotes = useMemo(
     () => (facetsActive ? notes.filter((note) => facetMatchesNote(note, facets)) : notes),
     [notes, facets, facetsActive],
@@ -1306,8 +1445,19 @@ function App() {
   const noteSummaryForSelected = notes.find((note) => note.id === selectedID);
   const selectedTags = noteSummaryForSelected?.tags || [];
   const hasSearchQuery = Boolean(searchText.trim());
+  // Search hits carry no metadata of their own, so the facets are applied by
+  // joining each hit back to its note summary — the same predicate the note tree
+  // and the graph use, so the three views can never disagree about a filter.
+  const visibleSearchResults = useMemo(() => {
+    if (!facetsActive) {
+      return searchResults;
+    }
+    const byID = new Map(notes.map((note) => [note.id, note]));
+    return searchResults.filter((result) => facetMatchesNote(byID.get(result.id), facets));
+  }, [searchResults, notes, facets, facetsActive]);
+  const filteredOutSearchCount = searchResults.length - visibleSearchResults.length;
   // Note IDs of the current search hits, passed to the graph to spotlight them.
-  const searchMatchIds = useMemo(() => searchResults.map((result) => result.id), [searchResults]);
+  const searchMatchIds = useMemo(() => visibleSearchResults.map((result) => result.id), [visibleSearchResults]);
 
   // Mount the graph the first time its tab is opened, then keep it mounted.
   useEffect(() => {
@@ -1339,6 +1489,10 @@ function App() {
     () => parseArticle(renderContent, noteSummaryForSelected?.title || basename(selectedID)),
     [renderContent, noteSummaryForSelected?.title, selectedID],
   );
+
+  // The note's YAML frontmatter verbatim. The article renderer drops it, so
+  // without this it is only visible by reading the source.
+  const frontmatterText = useMemo(() => frontmatterBlock(renderContent), [renderContent]);
 
   // Outgoing wiki-links extracted from the note content (resolved to loaded notes).
   const linkedNotes = useMemo(
@@ -1434,6 +1588,26 @@ function App() {
     return () => window.removeEventListener('keydown', onKey);
   }, [paletteOpen, linkPickerOpen, isEditing, rawMode, openLinkPicker]);
 
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (!(event.metaKey || event.ctrlKey) || activeTab !== 'note' || !selectedNote) {
+        return;
+      }
+      if (event.key === '+' || event.key === '=') {
+        event.preventDefault();
+        zoomInNote();
+      } else if (event.key === '-') {
+        event.preventDefault();
+        zoomOutNote();
+      } else if (event.key === '0') {
+        event.preventDefault();
+        resetNoteZoom();
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [activeTab, resetNoteZoom, selectedNote, zoomInNote, zoomOutNote]);
+
   const toggleTheme = useCallback(() => {
     const nextTheme = themeAppearance(theme) === 'dark' ? 'light' : 'dark';
     persistSettings({...settings, appearance: {...settings.appearance, theme: nextTheme}});
@@ -1454,8 +1628,14 @@ function App() {
   const fileNameShort = basename(selectedID);
   const dirty = saveState === 'dirty' || saveState === 'conflict';
   const currentWorkspaceSettings = workspace?.root ? workspaceSettingsFor(settings, workspace.root) : defaultWorkspaceSettings();
+  // The backend already hides roots that no longer exist and flags the starred
+  // ones. Starred workspaces are listed in full and are not counted against the
+  // recent cap — being permanently reachable is the whole point of starring.
+  const starredWorkspaces = useMemo(() => recent.filter((item) => item.starred), [recent]);
+  const recentWorkspaces = useMemo(() => recent.filter((item) => !item.starred).slice(0, 6), [recent]);
   const workspaceReadOnly = Boolean(workspace && currentWorkspaceSettings.accessMode !== 'editable' && currentWorkspaceSettings.accessMode !== 'writableGit');
   const readOnly = info.readOnly === true || workspaceReadOnly;
+  readOnlyRef.current = readOnly;
   const showSaveBar = Boolean(selectedNote) && !readOnly;
   const git = info.git ?? null;
   const writableGit = currentWorkspaceSettings.accessMode === 'writableGit' || info.mode === 'writable-git';
@@ -1495,7 +1675,11 @@ function App() {
   }, [currentWorkspaceSettings.defaultType, enabledNoteTemplateOptions, newNoteTemplate, workspace]);
 
   return (
-    <div className="gm-shell" data-theme={themeAppearance(theme)}>
+    <div
+      className="gm-shell"
+      data-theme={themeAppearance(theme)}
+      style={{'--font-read': readingFontFamily(settings.appearance.readingFont)} as CSSProperties}
+    >
       {/* ============================ HEADER ============================ */}
       <header className="gm-header">
         <div className="gm-brand">
@@ -1580,10 +1764,33 @@ function App() {
             </button>
             {openWorkspaceMenuOpen && (
               <div className="gm-open-menu" role="menu" aria-label="Open workspace">
-                {recent.slice(0, 6).length > 0 ? (
+                {starredWorkspaces.length > 0 && (
+                  <>
+                    <div className="gm-open-menu-label">Starred workspaces</div>
+                    {starredWorkspaces.map((item) => (
+                      <button
+                        type="button"
+                        className="gm-open-menu-item gm-open-menu-item-starred"
+                        role="menuitem"
+                        key={item.path}
+                        title={item.path}
+                        onClick={() => {
+                          setOpenWorkspaceMenuOpen(false);
+                          void openWorkspace(item.path);
+                        }}
+                      >
+                        <StarIcon size={13} filled className="gm-open-menu-star" />
+                        <span className="gm-open-menu-name">{basename(item.path)}</span>
+                        <span className="gm-open-menu-path">{item.path}</span>
+                      </button>
+                    ))}
+                    <div className="gm-open-menu-separator" />
+                  </>
+                )}
+                {recentWorkspaces.length > 0 ? (
                   <>
                     <div className="gm-open-menu-label">Recent workspaces</div>
-                    {recent.slice(0, 6).map((item) => (
+                    {recentWorkspaces.map((item) => (
                       <button
                         type="button"
                         className="gm-open-menu-item"
@@ -1601,9 +1808,9 @@ function App() {
                     ))}
                     <div className="gm-open-menu-separator" />
                   </>
-                ) : (
+                ) : starredWorkspaces.length === 0 ? (
                   <div className="gm-open-menu-empty">No recent workspaces</div>
-                )}
+                ) : null}
                 <button
                   type="button"
                   className="gm-open-menu-item gm-open-menu-browse"
@@ -1719,6 +1926,16 @@ function App() {
                   <span>Note ID</span>
                   <input value={newNoteID} onChange={(event) => setNewNoteID(event.target.value)} placeholder="folder/note-name" />
                 </label>
+                {workspaceMembers.length > 0 && (
+                  <label>
+                    <span>Workspace</span>
+                    <select value={newNoteMember} onChange={(event) => setNewNoteMember(event.target.value)}>
+                      {workspaceMembers.map((member) => (
+                        <option key={member.prefix} value={member.prefix} title={member.root}>{member.name}</option>
+                      ))}
+                    </select>
+                  </label>
+                )}
                 <div className="gm-inline-form-actions">
                   <button type="button" className="gm-btn gm-btn-ghost gm-btn-sm" onClick={() => setNewNoteOpen(false)}>Cancel</button>
                   <button type="submit" className="gm-btn gm-btn-primary gm-btn-sm" disabled={interactionBusy}>Create</button>
@@ -1731,6 +1948,16 @@ function App() {
                   <span>URL</span>
                   <input value={importURL} onChange={(event) => setImportURL(event.target.value)} placeholder="https://example.com/recipe" autoFocus />
                 </label>
+                {workspaceMembers.length > 0 && (
+                  <label>
+                    <span>Workspace</span>
+                    <select value={newNoteMember} onChange={(event) => setNewNoteMember(event.target.value)}>
+                      {workspaceMembers.map((member) => (
+                        <option key={member.prefix} value={member.prefix} title={member.root}>{member.name}</option>
+                      ))}
+                    </select>
+                  </label>
+                )}
                 <div className="gm-inline-form-actions">
                   <button type="button" className="gm-btn gm-btn-ghost gm-btn-sm" onClick={() => setImportOpen(false)}>Cancel</button>
                   <button type="submit" className="gm-btn gm-btn-primary gm-btn-sm" disabled={interactionBusy}>Import</button>
@@ -1744,10 +1971,12 @@ function App() {
               <RecentWorkspaceList recent={recent} disabled={interactionBusy} onOpen={(path) => void openWorkspace(path)} />
             ) : hasSearchQuery ? (
               <SearchResultsList
-                results={searchResults}
+                results={visibleSearchResults}
                 status={searchStatus}
                 query={searchText}
                 error={searchError}
+                filteredOut={filteredOutSearchCount}
+                onClearFacets={() => setFacets({types: [], tags: [], folders: [], favorites: false})}
                 onOpen={openSearchResult}
                 onToggleFavorite={toggleNoteFavorite}
               />
@@ -1852,6 +2081,21 @@ function App() {
                 <span className="gm-breadcrumb-file">{fileNameShort || 'No note selected'}</span>
               </div>
               </div>
+              {/* Read-only hides the save bar, and with it the source toggle.
+                  Reading the source is not authoring, so offer it on its own. */}
+              {readOnly && selectedNote && (
+                <div className="gm-subheader-actions">
+                  <button
+                    type="button"
+                    className={rawMode ? 'gm-btn gm-btn-toggle active' : 'gm-btn gm-btn-toggle'}
+                    onClick={toggleSourceMode}
+                    aria-pressed={rawMode}
+                    title={rawMode ? 'Back to the rendered note' : 'View the markdown source, including frontmatter'}
+                  >
+                    <CodeIcon size={15} />View source
+                  </button>
+                </div>
+              )}
               {showSaveBar && (
                 <div className="gm-subheader-actions">
                   {isEditing ? (
@@ -1947,10 +2191,17 @@ function App() {
                 </div>
               )}
               {selectedNote && activeTab === 'note' && (
-                <div className="gm-meta">
-                  <span className="gm-meta-item"><ClockIcon size={13} />Edited {modified || 'recently'}</span>
-                  <span>{wordCount} words · {readTime} min read</span>
-                </div>
+                <>
+                  <div className="gm-note-zoom" role="group" aria-label="Note zoom">
+                    <button type="button" onClick={zoomOutNote} disabled={noteZoom <= NOTE_ZOOM_MIN} title="Zoom out (⌘−)" aria-label="Zoom out">−</button>
+                    <button type="button" onClick={resetNoteZoom} disabled={noteZoom === settings.appearance.defaultZoom} title="Reset to default zoom (⌘0)">{Math.round(noteZoom * 100)}%</button>
+                    <button type="button" onClick={zoomInNote} disabled={noteZoom >= NOTE_ZOOM_MAX} title="Zoom in (⌘+)" aria-label="Zoom in">+</button>
+                  </div>
+                  <div className="gm-meta">
+                    <span className="gm-meta-item"><ClockIcon size={13} />Edited {modified || 'recently'}</span>
+                    <span>{wordCount} words · {readTime} min read</span>
+                  </div>
+                </>
               )}
             </div>
           </div>
@@ -2021,65 +2272,86 @@ function App() {
               </Suspense>
             </div>
           )}
-          {activeTab === 'graph' ? null : rawMode && selectedNoteReady && selectedNote ? (
-            <div className="gm-source-scroll scroll">
-              <div className="gm-source-wrap">
-                <div className="gm-source-card">
-                  <div className="gm-source-titlebar">
-                    <span className="gm-source-filename">{fileNameShort}.md</span>
-                  </div>
-                  <div className="gm-source-editor">
-                    <Suspense fallback={<div className="gm-empty"><h2>Loading editor…</h2></div>}>
-                      <CodeMirrorEditor
-                        ref={codeMirrorRef}
-                        value={draft}
-                        notes={notes}
-                        theme={themeAppearance(theme)}
-                        onChange={handleDraftChange}
-                        onSave={() => saveCurrentNote(true)}
-                        onNavigate={navigateToNote}
-                        onRequestLink={openLinkPicker}
-                        onSaveImage={saveImageAsset}
-                      />
-                    </Suspense>
+          {activeTab === 'graph' ? null : (
+            <NoteContextMenu
+              enabled={selectedNoteReady && Boolean(selectedNote)}
+              zoom={noteZoom}
+              canZoomIn={noteZoom < NOTE_ZOOM_MAX}
+              canZoomOut={noteZoom > NOTE_ZOOM_MIN}
+              onZoomIn={zoomInNote}
+              onZoomOut={zoomOutNote}
+              onResetZoom={resetNoteZoom}
+              onClipboardError={showToast}
+            >
+              {rawMode && selectedNoteReady && selectedNote ? (
+                <div className="gm-source-scroll scroll">
+                  <div className="gm-note-scale" style={{zoom: noteZoom}}>
+                    <div className="gm-source-wrap">
+                      <div className="gm-source-card">
+                        <div className="gm-source-titlebar">
+                          <span className="gm-source-filename">{fileNameShort}.md</span>
+                          {readOnly && <span className="gm-source-badge">Read-only</span>}
+                        </div>
+                        <div className="gm-source-editor">
+                          <Suspense fallback={<div className="gm-empty"><h2>Loading editor…</h2></div>}>
+                            <CodeMirrorEditor
+                              ref={codeMirrorRef}
+                              value={readOnly ? renderContent : draft}
+                              notes={notes}
+                              disabled={readOnly}
+                              theme={themeAppearance(theme)}
+                              onChange={handleDraftChange}
+                              onSave={() => saveCurrentNote(true)}
+                              onNavigate={navigateToNote}
+                              onRequestLink={openLinkPicker}
+                              onSaveImage={saveImageAsset}
+                            />
+                          </Suspense>
+                        </div>
+                      </div>
+                    </div>
                   </div>
                 </div>
-              </div>
-            </div>
-          ) : isEditing && selectedNoteReady && selectedNote ? (
-            <div className="gm-article-scroll scroll" ref={articleScrollRef}>
-              <div className="gm-article-editor-wrap">
-                <Suspense fallback={<div className="gm-empty"><h2>Loading editor…</h2></div>}>
-                  <MdxNoteEditor
-                    ref={mdxEditorRef}
-                    noteID={selectedID}
-                    content={renderContent}
-                    theme={themeAppearance(theme)}
-                    onNavigate={navigateToNote}
-                    onChange={handleDraftChange}
-                    onSaveImage={saveEditorImage}
-                    onRequestLink={openLinkPicker}
-                  />
-                </Suspense>
-              </div>
-            </div>
-          ) : selectedNoteReady && selectedNote ? (
-            <div className="gm-article-scroll scroll" ref={articleScrollRef}>
-              {settings.noteView.showFindBar && <FindBar containerRef={articleScrollRef} contentKey={selectedID} />}
-               <MarkdownArticle model={article} tags={selectedTags} noteID={selectedID} onNavigate={navigateToNote} theme={themeAppearance(theme)} loadAsset={LoadNoteAssetDataURL} />
-            </div>
-          ) : workspace && selectedID ? (
-            <div className="gm-empty">
-              <h2>Loading note</h2>
-              <p className="gm-mono">{selectedID}</p>
-            </div>
-          ) : (
-            <div className="gm-empty">
-              <h2>Open a workspace</h2>
-              <p>Select a local folder containing OKF Markdown concept documents.</p>
-              <button type="button" className="gm-btn gm-btn-primary" onClick={chooseWorkspace} disabled={interactionBusy}>Open Workspace</button>
-              <RecentWorkspaceList recent={recent} disabled={interactionBusy} onOpen={(path) => void openWorkspace(path)} variant="main" />
-            </div>
+              ) : isEditing && selectedNoteReady && selectedNote ? (
+                <div className="gm-article-scroll scroll" ref={articleScrollRef}>
+                  <div className="gm-note-scale" style={{zoom: noteZoom}}>
+                    <div className="gm-article-editor-wrap">
+                      <Suspense fallback={<div className="gm-empty"><h2>Loading editor…</h2></div>}>
+                        <MdxNoteEditor
+                          ref={mdxEditorRef}
+                          noteID={selectedID}
+                          content={renderContent}
+                          theme={themeAppearance(theme)}
+                          onNavigate={navigateToNote}
+                          onChange={handleDraftChange}
+                          onSaveImage={saveEditorImage}
+                          onRequestLink={openLinkPicker}
+                        />
+                      </Suspense>
+                    </div>
+                  </div>
+                </div>
+              ) : selectedNoteReady && selectedNote ? (
+                <div className="gm-article-scroll scroll" ref={articleScrollRef}>
+                  <div className="gm-note-scale" style={{zoom: noteZoom}}>
+                    {settings.noteView.showFindBar && <FindBar containerRef={articleScrollRef} contentKey={selectedID} />}
+                    <MarkdownArticle model={article} tags={selectedTags} noteID={selectedID} onNavigate={navigateToNote} theme={themeAppearance(theme)} loadAsset={LoadNoteAssetDataURL} />
+                  </div>
+                </div>
+              ) : workspace && selectedID ? (
+                <div className="gm-empty">
+                  <h2>Loading note</h2>
+                  <p className="gm-mono">{selectedID}</p>
+                </div>
+              ) : (
+                <div className="gm-empty">
+                  <h2>Open a workspace</h2>
+                  <p>Select a local folder containing OKF Markdown concept documents.</p>
+                  <button type="button" className="gm-btn gm-btn-primary" onClick={chooseWorkspace} disabled={interactionBusy}>Open Workspace</button>
+                  <RecentWorkspaceList recent={recent} disabled={interactionBusy} onOpen={(path) => void openWorkspace(path)} variant="main" />
+                </div>
+              )}
+            </NoteContextMenu>
           )}
         </main>
 
@@ -2144,6 +2416,15 @@ function App() {
                   <DetailRow label="Backlinks" value={String(backlinks.length)} />
                 </div>
               </div>
+
+              {selectedNoteReady && frontmatterText && (
+                <div className="gm-rail-block">
+                  <details className="gm-frontmatter" open>
+                    <summary className="gm-section-title gm-rail-title">Frontmatter</summary>
+                    <pre className="gm-frontmatter-body">{frontmatterText}</pre>
+                  </details>
+                </div>
+              )}
 
               <div className="gm-rail-block">
                 <div className="gm-rail-heading">
@@ -2278,6 +2559,10 @@ function App() {
           }
           return path;
         }}
+        onOpenWorkspace={(root) => {
+          setSettingsOpen(false);
+          void openWorkspace(root);
+        }}
         onChange={persistSettings}
         onSaveNoteType={async (definition) => {
           let saved: NoteType;
@@ -2394,6 +2679,7 @@ function SettingsModal({
   onClose,
   onSectionChange,
   onBrowseWorkspace,
+  onOpenWorkspace,
   onChange,
   onSaveNoteType,
   onDeleteNoteType,
@@ -2409,6 +2695,7 @@ function SettingsModal({
   onClose: () => void;
   onSectionChange: (section: SettingsSection) => void;
   onBrowseWorkspace: () => Promise<string>;
+  onOpenWorkspace: (root: string) => void;
   onChange: (settings: GoMentalSettings) => void;
   onSaveNoteType: (definition: NoteType) => Promise<void>;
   onDeleteNoteType: (id: string) => Promise<void>;
@@ -2452,6 +2739,7 @@ function SettingsModal({
     {id: 'noteView', label: 'Note View'},
     {id: 'graphView', label: 'Graph View'},
     {id: 'workspaceSettings', label: 'Workspace Settings'},
+    {id: 'composite', label: 'Composite Workspace'},
     {id: 'types', label: 'Note Types'},
   ];
   const saveLabel = saveState === 'saving' ? 'Saving...' : saveState === 'saved' ? 'Saved' : saveState === 'error' ? 'Could not save' : 'Auto-saved';
@@ -2536,6 +2824,49 @@ function SettingsModal({
                     {vscodeThemeOptions.map((theme) => <option key={theme.id} value={theme.id}>{theme.label} ({theme.category})</option>)}
                   </select>
                 </label>
+                <label className="gm-setting-row">
+                  <span>
+                    <strong>Reading font</strong>
+                    <small>Used when reading notes.</small>
+                  </span>
+                  <select
+                    value={settings.appearance.readingFont}
+                    onChange={(event) => onChange({
+                      ...settings,
+                      appearance: {
+                        ...settings.appearance,
+                        readingFont: event.target.value as GoMentalSettings['appearance']['readingFont'],
+                      },
+                    })}
+                  >
+                    <option value="newsreader">Newsreader</option>
+                    <option value="open-sans">Open Sans</option>
+                    <option value="calibri">Calibri</option>
+                    <option value="roboto">Roboto</option>
+                    <option value="georgia">Georgia</option>
+                    <option value="system-serif">System serif</option>
+                    <option value="system-sans">System sans-serif</option>
+                  </select>
+                </label>
+                <label className="gm-setting-row">
+                  <span>
+                    <strong>Default note zoom</strong>
+                    <small>Scales note text, images, diagrams, and editors.</small>
+                  </span>
+                  <select
+                    value={settings.appearance.defaultZoom}
+                    onChange={(event) => onChange({
+                      ...settings,
+                      appearance: {...settings.appearance, defaultZoom: Number(event.target.value)},
+                    })}
+                  >
+                    <option value={0.85}>85%</option>
+                    <option value={1}>100%</option>
+                    <option value={1.15}>115%</option>
+                    <option value={1.3}>130%</option>
+                    <option value={1.5}>150%</option>
+                  </select>
+                </label>
               </SettingsGroup>
             )}
             {activeSection === 'noteView' && (
@@ -2597,15 +2928,15 @@ function SettingsModal({
                   </span>
                   <input
                     type="range"
-                    min={1}
-                    max={4}
-                    value={settings.graphView.defaultDepth}
+                    min={0}
+                    max={DEPTH_OPTIONS.length - 1}
+                    value={Math.max(0, DEPTH_OPTIONS.indexOf(settings.graphView.defaultDepth))}
                     onChange={(event) => onChange({
                       ...settings,
-                      graphView: {...settings.graphView, defaultDepth: Number(event.target.value)},
+                      graphView: {...settings.graphView, defaultDepth: DEPTH_OPTIONS[Number(event.target.value)] ?? DEPTH_OPTIONS[0]},
                     })}
                   />
-                  <b className="gm-setting-value">{settings.graphView.defaultDepth}</b>
+                  <b className="gm-setting-value">{depthLabel(settings.graphView.defaultDepth)}</b>
                 </label>
               </SettingsGroup>
             )}
@@ -2632,6 +2963,15 @@ function SettingsModal({
                     </div>
                   </div>
                 ) : <div className="gm-workspace-empty gm-workspace-empty-large">Open a workspace to manage its installed types.</div>}
+              </SettingsGroup>
+            )}
+            {activeSection === 'composite' && (
+              <SettingsGroup title="Composite Workspace">
+                <CompositeSettings
+                  knownWorkspaces={workspacePaths}
+                  onBrowseWorkspace={onBrowseWorkspace}
+                  onOpenWorkspace={onOpenWorkspace}
+                />
               </SettingsGroup>
             )}
             {activeSection === 'workspaceSettings' && (
@@ -2715,6 +3055,20 @@ function SettingsModal({
                             })}
                           </div>
                         </div>
+                        <label className="gm-setting-row">
+                          <span>
+                            <strong>Star this workspace</strong>
+                            <small>Starred workspaces are always listed in the Open menu, even once they have aged out of the recent list.</small>
+                          </span>
+                          <input
+                            type="checkbox"
+                            checked={selectedWorkspaceSettings.starred}
+                            onChange={(event) => updateSelectedWorkspaceSettings({
+                              ...selectedWorkspaceSettings,
+                              starred: event.target.checked,
+                            })}
+                          />
+                        </label>
                         <label className="gm-setting-row">
                           <span>
                             <strong>Access mode</strong>
@@ -2910,6 +3264,143 @@ function SettingsModal({
   );
 }
 
+// CompositeSettings edits the single composite workspace: the set of workspaces
+// it spans. Members are stored by absolute path, and the composite is rebuilt
+// the next time it is opened rather than on save, so editing the list stays
+// cheap.
+function CompositeSettings({
+  knownWorkspaces,
+  onBrowseWorkspace,
+  onOpenWorkspace,
+}: {
+  knownWorkspaces: string[];
+  onBrowseWorkspace: () => Promise<string>;
+  onOpenWorkspace: (root: string) => void;
+}) {
+  const [composite, setComposite] = useState<GoMentalComposite | null>(null);
+  const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading');
+  const [error, setError] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    Composite()
+      .then((next) => {
+        if (!cancelled) {
+          setComposite(next);
+          setStatus('ready');
+        }
+      })
+      .catch((err) => {
+        if (!cancelled) {
+          setError(errorMessage(err));
+          setStatus('error');
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const memberRoots = composite?.members.map((member) => member.root) ?? [];
+  const save = async (roots: string[]) => {
+    setBusy(true);
+    setError('');
+    try {
+      setComposite(await SaveComposite(roots));
+    } catch (err) {
+      setError(errorMessage(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+  const addMember = async (root: string) => {
+    const trimmed = root.trim();
+    if (!trimmed || memberRoots.includes(trimmed)) {
+      return;
+    }
+    await save([...memberRoots, trimmed]);
+  };
+
+  if (status === 'loading') {
+    return <div className="gm-workspace-empty">Loading...</div>;
+  }
+
+  const available = knownWorkspaces.filter((path) => !memberRoots.includes(path) && path !== composite?.root);
+
+  return (
+    <div className="gm-composite">
+      <p className="gm-composite-intro">
+        A composite workspace shows several workspaces at once — one note list, one search index and one graph.
+        Notes stay in the workspace that owns them, and edits are written straight back there.
+      </p>
+      {error ? <div className="gm-composite-error">{error}</div> : null}
+      <div className="gm-composite-members">
+        {composite && composite.members.length > 0 ? (
+          composite.members.map((member) => (
+            <div className={member.missing ? 'gm-composite-member missing' : 'gm-composite-member'} key={member.root}>
+              <div className="gm-composite-member-text">
+                <span className="gm-workspace-name">
+                  {member.name}
+                  <code className="gm-composite-prefix">{member.prefix}/</code>
+                </span>
+                <span className="gm-workspace-path">{member.root}</span>
+                {member.missing ? <small className="gm-composite-missing">Not found on disk — its notes are skipped.</small> : null}
+              </div>
+              <button
+                type="button"
+                className="gm-btn gm-btn-sm gm-btn-ghost"
+                disabled={busy}
+                onClick={() => void save(memberRoots.filter((root) => root !== member.root))}
+              >
+                Remove
+              </button>
+            </div>
+          ))
+        ) : (
+          <div className="gm-workspace-empty">No workspaces yet. Add two or more to build a composite.</div>
+        )}
+      </div>
+      <div className="gm-composite-actions">
+        <button
+          type="button"
+          className="gm-btn gm-btn-sm gm-btn-ghost"
+          disabled={busy}
+          onClick={() => void onBrowseWorkspace().then((path) => addMember(path))}
+        >
+          <FolderIcon size={14} />Add workspace
+        </button>
+        {available.length > 0 ? (
+          <select
+            value=""
+            disabled={busy}
+            onChange={(event) => {
+              const value = event.target.value;
+              event.target.value = '';
+              if (value) {
+                void addMember(value);
+              }
+            }}
+          >
+            <option value="">Add a known workspace...</option>
+            {available.map((path) => (
+              <option key={path} value={path}>{basename(path)} — {path}</option>
+            ))}
+          </select>
+        ) : null}
+        <button
+          type="button"
+          className="gm-btn gm-btn-sm"
+          disabled={busy || !composite?.configured}
+          onClick={() => composite && onOpenWorkspace(composite.root)}
+        >
+          Open composite
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function SettingsGroup({title, children}: {title: string; children: ReactNode}) {
   return (
     <div className="gm-settings-group">
@@ -2924,6 +3415,8 @@ function SearchResultsList({
   status,
   query,
   error,
+  filteredOut,
+  onClearFacets,
   onOpen,
   onToggleFavorite,
 }: {
@@ -2931,6 +3424,8 @@ function SearchResultsList({
   status: SearchStatus;
   query: string;
   error: string;
+  filteredOut: number;
+  onClearFacets: () => void;
   onOpen: (id: string) => void;
   onToggleFavorite: (id: string, favorite: boolean) => void;
 }) {
@@ -2942,7 +3437,14 @@ function SearchResultsList({
   }
   return (
     <div className="gm-results">
-      <div className="gm-result-label">{results.length} result{results.length === 1 ? '' : 's'}</div>
+      <div className="gm-result-label">
+        <span>{results.length} result{results.length === 1 ? '' : 's'}</span>
+        {filteredOut > 0 && (
+          <button type="button" className="gm-result-filtered" onClick={onClearFacets} title="Clear the active filters">
+            {filteredOut} hidden by filters
+          </button>
+        )}
+      </div>
       {results.map((result) => (
         <button type="button" className="gm-result" key={result.id} onClick={() => onOpen(result.id)}>
           <div className="gm-result-head">
@@ -2975,7 +3477,11 @@ function SearchResultsList({
           {searchSnippet(result) && <SearchSnippet fragment={searchSnippet(result)} />}
         </button>
       ))}
-      {results.length === 0 && <div className="gm-result-empty">No notes match “{query}”.</div>}
+      {results.length === 0 && (
+        <div className="gm-result-empty">
+          {filteredOut > 0 ? <>No notes match “{query}” with the active filters.</> : <>No notes match “{query}”.</>}
+        </div>
+      )}
     </div>
   );
 }
@@ -3010,7 +3516,10 @@ function RecentWorkspaceList({
       <div className="gm-section-title gm-recent-title">Recent workspaces</div>
       {visibleRecent.map((item) => (
         <button type="button" className="gm-recent-row" key={item.path} onClick={() => onOpen(item.path)} disabled={disabled}>
-          <span className="gm-recent-name">{basename(item.path)}</span>
+          <span className="gm-recent-name">
+            {item.starred && <StarIcon size={12} filled className="gm-open-menu-star" />}
+            {basename(item.path)}
+          </span>
           <span className="gm-recent-path">{item.path}</span>
         </button>
       ))}
@@ -3296,13 +3805,21 @@ function normalizeSettings(value: GoMentalSettings): GoMentalSettings {
   const theme = value?.appearance?.theme === 'light' || value?.appearance?.theme === 'dark' || themeOption(value?.appearance?.theme || '')
     ? value.appearance.theme
     : DEFAULT_SETTINGS.appearance.theme;
+  const readingFont = isReadingFont(value?.appearance?.readingFont)
+    ? value.appearance.readingFont
+    : DEFAULT_SETTINGS.appearance.readingFont;
+  const defaultZoom = clamp(Number(value?.appearance?.defaultZoom) || DEFAULT_SETTINGS.appearance.defaultZoom, NOTE_ZOOM_MIN, NOTE_ZOOM_MAX);
   const defaultEditMode = value?.noteView?.defaultEditMode === 'source' || value?.noteView?.defaultEditMode === 'rich'
     ? value.noteView.defaultEditMode
     : DEFAULT_SETTINGS.noteView.defaultEditMode;
   const defaultMode = value?.graphView?.defaultMode === '3d' || value?.graphView?.defaultMode === '2d'
     ? value.graphView.defaultMode
     : DEFAULT_SETTINGS.graphView.defaultMode;
-  const defaultDepth = clamp(Number(value?.graphView?.defaultDepth) || DEFAULT_SETTINGS.graphView.defaultDepth, 1, 4);
+  // Depth is one of the DEPTH_OPTIONS stops; anything else (including a stale
+  // value from an older build) falls back to the default. The last stop is the
+  // negative "unbounded" sentinel, so this can't be a numeric clamp.
+  const rawDepth = Number(value?.graphView?.defaultDepth);
+  const defaultDepth = DEPTH_OPTIONS.includes(rawDepth) ? rawDepth : DEFAULT_SETTINGS.graphView.defaultDepth;
   const workspaces: Record<string, GoMentalWorkspaceSettings> = {};
   for (const [path, workspaceSettings] of Object.entries(value?.workspaces || {})) {
     const trimmedPath = path.trim();
@@ -3317,7 +3834,7 @@ function normalizeSettings(value: GoMentalSettings): GoMentalSettings {
   }
   return {
     version: 3,
-    appearance: {theme},
+    appearance: {theme, readingFont, defaultZoom},
     noteView: {
       defaultEditMode,
       showFindBar: typeof value?.noteView?.showFindBar === 'boolean' ? value.noteView.showFindBar : DEFAULT_SETTINGS.noteView.showFindBar,
@@ -3370,6 +3887,7 @@ function defaultWorkspaceSettings(): GoMentalWorkspaceSettings {
     defaultType: 'term',
     enabledTypes: [],
     accessMode: 'editable',
+    starred: false,
     gitUrl: '',
     gitBaseRef: 'main',
     gitPath: '',
@@ -3402,6 +3920,7 @@ function normalizeWorkspaceSettings(value: GoMentalWorkspaceSettings): GoMentalW
     defaultType,
     enabledTypes,
     accessMode,
+    starred: value?.starred === true,
     gitUrl: accessMode === 'readOnlyGit' || accessMode === 'writableGit' ? (value?.gitUrl || '').trim() : '',
     gitBaseRef: accessMode === 'readOnlyGit' || accessMode === 'writableGit' ? (value?.gitBaseRef || 'main').trim() : '',
     gitPath: accessMode === 'writableGit' ? (value?.gitPath || '').trim() : '',
@@ -3528,4 +4047,3 @@ function isConflictError(err: unknown): boolean {
 
 
 export default App;
-

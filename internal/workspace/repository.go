@@ -19,6 +19,13 @@ func NewFileNoteRepository(workspace Workspace) *FileNoteRepository {
 	return &FileNoteRepository{workspace: workspace}
 }
 
+// Workspace returns the workspace this repository reads from, so callers that
+// parse its notes can pick up the right ingest profile without being handed the
+// workspace separately.
+func (r *FileNoteRepository) Workspace() Workspace {
+	return r.workspace
+}
+
 func (r *FileNoteRepository) List(ctx context.Context) ([]domain.NoteSummary, error) {
 	scanned, err := r.workspace.ScanNotes(ctx)
 	if err != nil {

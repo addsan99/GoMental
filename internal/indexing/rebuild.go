@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"GoMental/internal/composite"
 	"GoMental/internal/domain"
 	"GoMental/internal/graph"
 	"GoMental/internal/okf"
@@ -105,14 +106,7 @@ func (r Rebuilder) RebuildWorkspaceSoftLinks(ctx context.Context, root string) e
 	if err != nil {
 		return err
 	}
-	ids := make([]domain.NoteID, 0, len(parsed))
-	for _, note := range parsed {
-		ids = append(ids, note.ID)
-	}
-	resolver := okf.NewResolver(ids)
-	for i := range parsed {
-		parsed[i].Links = resolver.ResolveLinks(parsed[i].ID, parsed[i].Links)
-	}
+	composite.ResolveAll(ws, parsed)
 	return r.RebuildSoftLinks(ctx, filepath.Join(ws.MetadataPath(), "state", "rebuild.json"), graph.GraphPath(ws.Root()), parsed)
 }
 
@@ -148,14 +142,7 @@ func (r Rebuilder) RebuildCore(ctx context.Context, root string) (RebuildResult,
 	if err != nil {
 		return RebuildResult{}, nil, err
 	}
-	ids := make([]domain.NoteID, 0, len(parsed))
-	for _, note := range parsed {
-		ids = append(ids, note.ID)
-	}
-	resolver := okf.NewResolver(ids)
-	for i := range parsed {
-		parsed[i].Links = resolver.ResolveLinks(parsed[i].ID, parsed[i].Links)
-	}
+	composite.ResolveAll(ws, parsed)
 
 	searchPath := search.WorkspaceSearchPath(ws.Root())
 	graphPath := graph.GraphPath(ws.Root())
@@ -283,7 +270,7 @@ func (r Rebuilder) parseNotes(ctx context.Context, repo *workspace.FileNoteRepos
 		workers = 1
 	}
 	var wg sync.WaitGroup
-	codec := okf.NewCodec()
+	ws := repo.Workspace()
 	for i := 0; i < workers; i++ {
 		wg.Add(1)
 		go func() {
@@ -298,7 +285,7 @@ func (r Rebuilder) parseNotes(ctx context.Context, repo *workspace.FileNoteRepos
 					results <- parseResult{id: summary.ID, err: err}
 					continue
 				}
-				parsed, err := codec.Decode(note.ID, note.Document.Raw, note.ModifiedAt)
+				parsed, err := composite.Decode(ws, note.ID, note.Document.Raw, note.ModifiedAt)
 				if err != nil {
 					results <- parseResult{id: note.ID, err: err}
 					continue

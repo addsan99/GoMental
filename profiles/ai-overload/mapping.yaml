@@ -1,0 +1,58 @@
+# GoMental ingest profile for an AI-Overload repo overload.
+#
+# Copy this file to <workspace>/.gomental/mapping.yaml.
+#
+# Intended workspace root:
+#   <ai-overloads>/ai-repo-overloads/storm/.github/copilot-instructions
+#
+# AI-Overload is treated as frozen: nothing here writes to the corpus. The
+# profile only tells GoMental how to read what is already there.
+version: 1
+
+rules:
+  # Topics carry full frontmatter (title/keywords/depth/depends_on/relates_to/
+  # extended_by) but no `type`, which is the only reason they fail to ingest
+  # as-is. Their reference fields are paths relative to topics/.
+  - match: "topics/**"
+    defaults:
+      type: topic
+    searchAliases:
+      - keywords
+    # depth has exactly three values (deep-dive / detail / hub), so it makes a
+    # useful tag: notes group under three graph hub nodes and become filterable.
+    tagFields:
+      - depth
+    links:
+      - field: depends_on
+        strength: hard
+        basePath: topics
+      - field: extended_by
+        strength: hard
+        basePath: topics
+      - field: relates_to
+        strength: soft
+        basePath: topics
+
+  # Expertise, procedures and tool overviews have no frontmatter at all. The
+  # default type makes them ingestible; the title falls back to the first
+  # heading, exactly as it does for any other note.
+  - match: "expertise/**"
+    defaults:
+      type: expertise
+  - match: "procedures/**"
+    defaults:
+      type: procedure
+  - match: "tool-overviews/**"
+    defaults:
+      type: tool-overview
+
+# Auto-generated feature-flag topics are 456 of the 610 topic files and add no
+# navigable knowledge. Excluding them keeps the graph and search readable.
+exclude:
+  - "topics/feature-flags/**"
+
+# Body links are frequently written as repo-root-absolute paths. Stripping the
+# corpus prefix turns them back into workspace-relative note references;
+# anything else (e.g. /src/...) is left alone and stays an external path.
+stripLinkPrefixes:
+  - "/.github/copilot-instructions"

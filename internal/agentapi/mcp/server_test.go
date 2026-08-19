@@ -102,7 +102,7 @@ func TestMCPInitializeAndToolsList(t *testing.T) {
 	if err := json.Unmarshal(data, &tl); err != nil {
 		t.Fatalf("decode tools: %v", err)
 	}
-	want := map[string]bool{"search_wiki": false, "read_note": false, "list_notes": false, "create_note": false, "edit_note": false, "upload_asset": false, "backlinks": false, "neighborhood": false, "expand_context": false, "explain_link": false}
+	want := map[string]bool{"search_wiki": false, "read_note": false, "list_notes": false, "create_note": false, "list_workspace_members": false, "edit_note": false, "upload_asset": false, "backlinks": false, "neighborhood": false, "expand_context": false, "explain_link": false}
 	for _, tool := range tl.Tools {
 		want[tool.Name] = true
 	}

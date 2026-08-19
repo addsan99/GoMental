@@ -3,11 +3,22 @@
 // reused across the 2D (flat) and 3D instances without touching component state.
 import type {LinkType} from './model';
 
-export const DEPTH_OPTIONS = [1, 2, 3];
-// Deepest ring the depth-shaded colouring is normalised against. Fixed (not the
-// per-graph max) so a node at a given hop is the same colour regardless of the
-// depth setting — e.g. a 2-hop node looks identical at depth=2 and depth=3.
-export const MAX_DEPTH_HOPS = DEPTH_OPTIONS[DEPTH_OPTIONS.length - 1];
+// Selectable hop limits for the graph views, in slider order. DEPTH_UNBOUNDED is
+// the "Max" stop: no hop limit at all, i.e. every note in the workspace. It is
+// negative so it can be passed straight through to the backend, which reads a
+// negative GraphQuery depth as unbounded.
+export const DEPTH_UNBOUNDED = -1;
+export const DEPTH_OPTIONS = [1, 2, 3, 4, DEPTH_UNBOUNDED];
+// Deepest finite ring the depth-shaded colouring is normalised against. Fixed
+// (not the per-graph max) so a node at a given hop is the same colour regardless
+// of the depth setting — e.g. a 2-hop node looks identical at depth=2 and
+// depth=4. Rings beyond this are clamped to the far end of the ramp, which is
+// what keeps the unbounded view readable.
+export const MAX_DEPTH_HOPS = 4;
+
+export function depthLabel(depth: number): string {
+  return depth < 0 ? 'Max' : String(depth);
+}
 
 export const HUB_NODE_KINDS = new Set(['tag', 'type', 'heading']);
 

@@ -97,6 +97,29 @@ func TestScanNotesExcludesMetadataReservedAndTemporaryFiles(t *testing.T) {
 	}
 }
 
+func TestScanNotesHonoursMappingExcludes(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, root, "topics", "alpha.md", "---\ntype: topic\n---\n# Alpha\n")
+	writeFile(t, root, "topics", "feature-flags", "flag-a.md", "---\ntype: topic\n---\n# Flag\n")
+	writeFile(t, root, ".gomental", "mapping.yaml", "version: 1\nexclude:\n  - \"topics/feature-flags/**\"\n")
+
+	ws, err := Open(root)
+	if err != nil {
+		t.Fatalf("open workspace: %v", err)
+	}
+	if ws.Mapping().IsZero() {
+		t.Fatal("expected the workspace to load its mapping")
+	}
+	notes, err := ws.ScanNotes(context.Background())
+	if err != nil {
+		t.Fatalf("scan notes: %v", err)
+	}
+	got := ids(notes)
+	if len(got) != 1 || got[0] != "topics/alpha" {
+		t.Fatalf("expected only topics/alpha, got %v", got)
+	}
+}
+
 func TestCaseFoldKeyUsesWindowsFirstCollisionPolicy(t *testing.T) {
 	if caseFoldKey("Folder/Alpha") != caseFoldKey("folder/alpha") {
 		t.Fatal("expected note IDs to collide case-insensitively")

@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"GoMental/internal/domain"
+	"GoMental/internal/ingest"
 )
 
 const DefaultMetadataDir = ".workspace"
@@ -14,6 +15,8 @@ const DefaultMetadataDir = ".workspace"
 type Workspace struct {
 	root        string
 	metadataDir string
+	mapping     ingest.Mapping
+	members     []Member
 }
 
 func Open(root string) (Workspace, error) {
@@ -39,7 +42,20 @@ func OpenWithMetadataDir(root, metadataDir string) (Workspace, error) {
 	if !info.IsDir() {
 		return Workspace{}, fmt.Errorf("%w: not a directory", ErrInvalidWorkspaceRoot)
 	}
-	return Workspace{root: clean, metadataDir: metadataDir}, nil
+	mapping, err := ingest.Load(clean)
+	if err != nil {
+		return Workspace{}, fmt.Errorf("%w: %v", ErrInvalidWorkspaceRoot, err)
+	}
+	members, err := openMembers(clean, metadataDir)
+	if err != nil {
+		return Workspace{}, fmt.Errorf("%w: %v", ErrInvalidWorkspaceRoot, err)
+	}
+	return Workspace{root: clean, metadataDir: metadataDir, mapping: mapping, members: members}, nil
+}
+
+// Mapping returns the workspace's ingest profile (zero value when it has none).
+func (w Workspace) Mapping() ingest.Mapping {
+	return w.mapping
 }
 
 func (w Workspace) Root() string {
@@ -62,6 +78,9 @@ func (w Workspace) NormalizeNoteID(raw string) (domain.NoteID, error) {
 	if filepath.IsAbs(raw) || strings.HasPrefix(raw, "/") || strings.HasPrefix(raw, `\\`) {
 		return "", fmt.Errorf("%w: absolute path", ErrInvalidNoteID)
 	}
+	if len(raw) >= 3 && isWindowsDrivePrefix(raw) {
+		return "", fmt.Errorf("%w: absolute path", ErrInvalidNoteID)
+	}
 	slashed := strings.ReplaceAll(raw, `\\`, "/")
 	clean := filepath.ToSlash(filepath.Clean(filepath.FromSlash(slashed)))
 	if clean == "." || clean == ".." || strings.HasPrefix(clean, "../") || strings.Contains(clean, "/../") {
@@ -79,7 +98,20 @@ func (w Workspace) NormalizeNoteID(raw string) (domain.NoteID, error) {
 	return domain.NoteID(clean), nil
 }
 
+func isWindowsDrivePrefix(path string) bool {
+	return ((path[0] >= 'A' && path[0] <= 'Z') || (path[0] >= 'a' && path[0] <= 'z')) &&
+		path[1] == ':' &&
+		(path[2] == '/' || path[2] == '\\')
+}
+
 func (w Workspace) PathForNoteID(id domain.NoteID) (string, error) {
+	if w.IsComposite() {
+		member, memberID, err := w.MemberForNoteID(id)
+		if err != nil {
+			return "", err
+		}
+		return member.ws.PathForNoteID(memberID)
+	}
 	normalized, err := w.NormalizeNoteID(string(id))
 	if err != nil {
 		return "", err
@@ -93,6 +125,17 @@ func (w Workspace) PathForNoteID(id domain.NoteID) (string, error) {
 }
 
 func (w Workspace) NoteIDFromPath(path string) (domain.NoteID, error) {
+	if w.IsComposite() {
+		member, ok := w.MemberForPath(path)
+		if !ok {
+			return "", ErrPathEscapesWorkspace
+		}
+		id, err := member.ws.NoteIDFromPath(path)
+		if err != nil {
+			return "", err
+		}
+		return member.NamespaceNoteID(id), nil
+	}
 	abs, err := filepath.Abs(path)
 	if err != nil {
 		return "", err
@@ -117,6 +160,11 @@ func (w Workspace) NoteIDFromPath(path string) (domain.NoteID, error) {
 }
 
 func (w Workspace) IsMetadataPath(path string) bool {
+	if w.IsComposite() {
+		if member, ok := w.MemberForPath(path); ok && member.ws.IsMetadataPath(path) {
+			return true
+		}
+	}
 	abs, err := filepath.Abs(path)
 	if err != nil {
 		return false
@@ -130,6 +178,11 @@ func (w Workspace) IsMetadataPath(path string) bool {
 }
 
 func (w Workspace) ensureInside(path string) error {
+	if w.IsComposite() {
+		if _, ok := w.MemberForPath(path); ok {
+			return nil
+		}
+	}
 	abs, err := filepath.Abs(path)
 	if err != nil {
 		return err

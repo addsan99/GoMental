@@ -1,0 +1,76 @@
+name: AI-Overload
+types:
+  - id: topic
+    label: Topic
+    description: An AI-Overload topic document, the unit of knowledge in a repo overload.
+    template: |
+      ---
+      type: {{type}}
+      title: {{titleYaml}}
+      keywords: []
+      depth: detail
+      depends_on: []
+      relates_to: []
+      extended_by: []
+      ---
+
+      # {{title}}
+
+      ## Overview
+
+      ## Details
+
+      ## Related
+
+  - id: expertise
+    label: Expertise
+    description: A role-shaped guide describing how to work in one area of a repo.
+    template: |
+      ---
+      type: {{type}}
+      title: {{titleYaml}}
+      ---
+
+      # {{title}}
+
+      ## When to use this
+
+      ## What you need to know
+
+      ## Common tasks
+
+  - id: procedure
+    label: Procedure
+    description: A step-by-step operational runbook.
+    template: |
+      ---
+      type: {{type}}
+      title: {{titleYaml}}
+      ---
+
+      # {{title}}
+
+      ## Preconditions
+
+      ## Steps
+
+      1.
+
+      ## Verification
+
+  - id: tool-overview
+    label: Tool Overview
+    description: A description of a tool or service a repo depends on.
+    template: |
+      ---
+      type: {{type}}
+      title: {{titleYaml}}
+      ---
+
+      # {{title}}
+
+      ## What it is
+
+      ## How it is used here
+
+      ## Gotchas

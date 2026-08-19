@@ -27,7 +27,29 @@ export function MermaidDiagram({code, theme}: MermaidDiagramProps) {
         mermaid.initialize({
           startOnLoad: false,
           securityLevel: 'strict',
-          theme: theme === 'dark' ? 'dark' : 'default',
+          theme: theme === 'dark' ? 'base' : 'default',
+          themeVariables: theme === 'dark'
+            ? {
+              fontSize: '20px',
+              background: '#202329',
+                primaryColor: '#155e9f',
+                primaryTextColor: '#f8fafc',
+                primaryBorderColor: '#60a5fa',
+                secondaryColor: '#374151',
+                secondaryTextColor: '#f8fafc',
+                secondaryBorderColor: '#94a3b8',
+                tertiaryColor: '#30343b',
+                tertiaryTextColor: '#f8fafc',
+                tertiaryBorderColor: '#94a3b8',
+                lineColor: '#cbd5e1',
+                textColor: '#f8fafc',
+                mainBkg: '#155e9f',
+                nodeBorder: '#60a5fa',
+                clusterBkg: '#272b33',
+                clusterBorder: '#94a3b8',
+                edgeLabelBackground: '#30343b',
+              }
+            : {fontSize: '20px'},
         });
         const {svg} = await mermaid.render(id, code.trim());
         if (cancelled) {

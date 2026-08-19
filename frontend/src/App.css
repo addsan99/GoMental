@@ -95,8 +95,8 @@ select {
 
 /* ---- Shell ---- */
 .gm-shell {
-  display: grid;
-  grid-template-rows: 56px 1fr;
+  display: flex;
+  flex-direction: column;
   height: 100vh;
   min-height: 0;
   background: var(--bg);
@@ -108,6 +108,7 @@ select {
   position: relative;
   display: grid;
   grid-template-columns: var(--gm-sidebar-w, 290px) minmax(0, 1fr) 300px;
+  flex: 1 1 auto;
   min-height: 0;
 }
 .gm-body.gm-rail-collapsed {
@@ -244,6 +245,7 @@ body.gm-resizing * { cursor: col-resize !important; }
   align-items: center;
   gap: 14px;
   padding: 0 16px;
+  flex: 0 0 56px;
   background: var(--surface);
   border-bottom: 1px solid var(--border);
   z-index: 20;
@@ -341,6 +343,7 @@ body.gm-resizing * { cursor: col-resize !important; }
   align-items: center;
   gap: 8px;
   padding: 7px 16px;
+  flex: 0 0 auto;
   background: var(--accent-soft);
   border-bottom: 1px solid var(--accent-soft-line);
   color: var(--text);
@@ -428,6 +431,22 @@ body.gm-resizing * { cursor: col-resize !important; }
   text-align: left;
 }
 .gm-open-menu-item:hover { background: var(--surface-2); }
+/* Starred rows gain a leading star column; the icon spans both text rows so the
+   name and path stay aligned with the unstarred entries below them. */
+.gm-open-menu-item-starred {
+  grid-template-columns: auto minmax(0, 1fr);
+  column-gap: 8px;
+}
+.gm-open-menu-star {
+  grid-row: 1 / span 2;
+  align-self: center;
+  color: var(--accent, #e0a33e);
+}
+.gm-recent-name .gm-open-menu-star {
+  grid-row: auto;
+  margin-right: 5px;
+  vertical-align: -1px;
+}
 .gm-open-menu-name {
   font: 600 13px/1.25 var(--font-ui);
   white-space: nowrap;
@@ -614,7 +633,12 @@ body.gm-resizing * { cursor: col-resize !important; }
 
 /* ---- Search results (sidebar) ---- */
 .gm-results { display: flex; flex-direction: column; gap: 2px; }
-.gm-result-label { padding: 2px 8px 8px; font: 500 11.5px/1 var(--font-ui); color: var(--text-3); letter-spacing: .02em; }
+.gm-result-label { padding: 2px 8px 8px; font: 500 11.5px/1 var(--font-ui); color: var(--text-3); letter-spacing: .02em; display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.gm-result-filtered {
+  font: 500 11.5px/1 var(--font-ui); letter-spacing: .02em; color: var(--accent);
+  background: none; border: 0; padding: 0; cursor: pointer; text-align: right;
+}
+.gm-result-filtered:hover { text-decoration: underline; }
 .gm-result-error { padding: 12px 8px; font: 400 12.5px/1.5 var(--font-ui); color: #b4432e; }
 
 .gm-result {
@@ -696,10 +720,57 @@ body.gm-resizing * { cursor: col-resize !important; }
 
 .gm-meta { display: flex; align-items: center; gap: 16px; font: 400 12px/1 var(--font-ui); color: var(--text-3); padding-bottom: 9px; }
 .gm-meta-item { display: flex; align-items: center; gap: 5px; }
+.gm-note-zoom {
+  display: inline-flex; align-items: center; overflow: hidden; margin-left: auto; margin-bottom: 6px;
+  border: 1px solid var(--border); border-radius: 7px; background: var(--surface);
+}
+.gm-note-zoom button {
+  min-width: 28px; height: 24px; padding: 0 7px; border: 0; border-right: 1px solid var(--border);
+  background: transparent; color: var(--text-2); cursor: pointer; font: 500 11px/1 var(--font-mono);
+}
+.gm-note-zoom button:last-child { border-right: 0; }
+.gm-note-zoom button:hover:not(:disabled) { background: var(--surface-2); color: var(--text); }
+.gm-note-zoom button:disabled { color: var(--text-3); cursor: default; }
 
 /* ---- Rendered article ---- */
-.gm-article-scroll { flex: 1; overflow-y: auto; min-height: 0; }
-.gm-article { max-width: 1000px; margin: 0 auto; padding: 36px 48px 120px; animation: gm-fade .25s ease; }
+.gm-article-scroll { flex: 1; overflow: auto; min-height: 0; }
+.gm-note-scale { width: 100%; transform-origin: top center; }
+.gm-article { max-width: 1400px; margin: 0 auto; padding: 36px 48px 120px; animation: gm-fade .25s ease; }
+
+/* The context menu is scoped to the note pane, keeping graph and shell-native
+   right-click behavior untouched. CSS zoom scales text, diagrams, and images
+   together in both WebView2 and WKWebView. */
+.gm-note-context-surface { position: relative; flex: 1; min-width: 0; min-height: 0; display: flex; }
+.gm-note-scale { min-width: 0; }
+.gm-note-context-menu {
+  position: fixed; z-index: 100;
+  width: 232px; padding: 5px;
+  background: var(--surface); color: var(--text);
+  border: 1px solid var(--border-strong);
+  box-shadow: var(--shadow-md);
+  font: 400 13px/1.2 var(--font-ui);
+}
+.gm-note-context-menu--mac {
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--surface) 92%, transparent);
+  backdrop-filter: blur(16px) saturate(1.15);
+}
+.gm-note-context-menu--windows { border-radius: 2px; }
+.gm-note-context-item {
+  width: 100%; min-height: 28px; padding: 5px 8px;
+  display: flex; align-items: center; justify-content: space-between; gap: 20px;
+  border: none; border-radius: 4px; background: transparent; color: var(--text);
+  cursor: default; text-align: left; font: inherit;
+}
+.gm-note-context-item:hover:not(:disabled),
+.gm-note-context-item:focus-visible:not(:disabled) {
+  background: var(--accent); color: var(--accent-on); outline: none;
+}
+.gm-note-context-item:disabled { color: var(--text-3); }
+.gm-note-context-shortcut { color: var(--text-3); font-size: 12px; }
+.gm-note-context-item:hover:not(:disabled) .gm-note-context-shortcut,
+.gm-note-context-item:focus-visible:not(:disabled) .gm-note-context-shortcut { color: inherit; }
+.gm-note-context-separator { height: 1px; margin: 5px 4px; background: var(--border); }
 
 /* ---- Find-in-note bar (Ctrl+F) ---- */
 /* Sticky overlay pinned to the top-right of the read view. The negative bottom
@@ -798,6 +869,13 @@ body.gm-resizing * { cursor: col-resize !important; }
   background: var(--surface-2); border: 1px solid var(--border); border-radius: 12px;
 }
 .gm-mermaid svg { max-width: 100%; height: auto; }
+[data-theme="dark"] .gm-mermaid svg text,
+[data-theme="dark"] .gm-mermaid svg .edgeLabel,
+[data-theme="dark"] .gm-mermaid svg .edgeLabel p { fill: #f8fafc !important; color: #f8fafc !important; }
+[data-theme="dark"] .gm-mermaid svg .edgeLabel rect { fill: #30343b !important; opacity: 1 !important; }
+[data-theme="dark"] .gm-mermaid svg .flowchart-link,
+[data-theme="dark"] .gm-mermaid svg .edgePath path.path { stroke: #cbd5e1 !important; }
+[data-theme="dark"] .gm-mermaid svg marker path { fill: #cbd5e1 !important; stroke: #cbd5e1 !important; }
 .gm-mermaid-error { flex-direction: column; align-items: stretch; gap: 8px; }
 .gm-mermaid-error-msg { font: 400 12.5px/1.5 var(--font-mono); color: #c0392b; }
 [data-theme="dark"] .gm-mermaid-error-msg { color: #f0a08c; }
@@ -815,13 +893,13 @@ body.gm-resizing * { cursor: col-resize !important; }
 }
 [data-theme="dark"] .gm-image-broken { color: #f0a08c; }
 
-.gm-table-card { border: 1px solid var(--border); border-radius: 12px; overflow: hidden; margin: 8px 0 24px; background: var(--surface); box-shadow: var(--shadow-sm); }
-.gm-table { width: 100%; border-collapse: collapse; }
+.gm-table-card { border: 1px solid var(--border); border-radius: 12px; overflow-x: auto; margin: 8px 0 24px; background: var(--surface); box-shadow: var(--shadow-sm); }
+.gm-table { width: max-content; min-width: 100%; border-collapse: collapse; }
 .gm-table thead tr { background: var(--surface-2); }
-.gm-th { padding: 11px 16px; text-align: left; font: 600 12px/1 var(--font-ui); letter-spacing: .03em; text-transform: uppercase; color: var(--text-3); }
+.gm-th { min-width: 10rem; padding: 11px 16px; text-align: left; font: 600 12px/1 var(--font-ui); letter-spacing: .03em; text-transform: uppercase; color: var(--text-3); }
 .gm-th-num { text-align: right; }
 .gm-table tbody tr { border-top: 1px solid var(--border); }
-.gm-td { padding: 11px 16px; text-align: left; font: 400 15px/1.5 var(--font-read); color: var(--text); }
+.gm-td { min-width: 10rem; padding: 11px 16px; text-align: left; font: 400 15px/1.5 var(--font-read); color: var(--text); }
 .gm-td-num { text-align: right; font-weight: 500; color: var(--text-2); font-variant-numeric: tabular-nums; white-space: nowrap; }
 
 .gm-steps { display: flex; flex-direction: column; gap: 14px; margin: 6px 0 24px; }
@@ -840,6 +918,8 @@ body.gm-resizing * { cursor: col-resize !important; }
 .gm-list { display: flex; flex-direction: column; gap: 8px; margin: 6px 0 24px; }
 .gm-list-item { display: flex; gap: 11px; align-items: baseline; }
 .gm-list-dot { width: 6px; height: 6px; border-radius: 9999px; background: var(--accent); flex: none; transform: translateY(-3px); }
+/* Nested bullets are hollow, so depth reads even when the indent is subtle. */
+.gm-list-dot-nested { background: transparent; border: 1.5px solid var(--accent); }
 .gm-list-text { font: 400 17px/1.6 var(--font-read); color: var(--text); }
 
 .gm-callout {
@@ -850,7 +930,7 @@ body.gm-resizing * { cursor: col-resize !important; }
 .gm-callout-body { font: 400 16px/1.6 var(--font-read); color: var(--text); }
 
 /* MdxNoteEditor when editing inside the article scroll */
-.gm-article-editor-wrap { max-width: 1000px; margin: 0 auto; padding: 24px 48px 96px; animation: gm-fade .2s ease; }
+.gm-article-editor-wrap { max-width: 1400px; margin: 0 auto; padding: 24px 48px 96px; animation: gm-fade .2s ease; }
 
 /* ---- Rich (MDX) editor ---- */
 /* OKF frontmatter disclosure is app-owned markup, so it doesn't pick up the
@@ -930,8 +1010,8 @@ body.gm-resizing * { cursor: col-resize !important; }
 }
 
 /* ---- Source view ---- */
-.gm-source-scroll { flex: 1; overflow-y: auto; min-height: 0; background: var(--bg); }
-.gm-source-wrap { max-width: 1000px; margin: 0 auto; padding: 28px 32px 96px; }
+.gm-source-scroll { flex: 1; overflow: auto; min-height: 0; background: var(--bg); }
+.gm-source-wrap { max-width: 1400px; margin: 0 auto; padding: 28px 32px 96px; }
 .gm-source-card { border: 1px solid var(--border); border-radius: 12px; overflow: hidden; background: var(--surface); box-shadow: var(--shadow-sm); }
 .gm-source-titlebar {
   display: flex; align-items: center; gap: 8px; padding: 9px 14px;
@@ -939,6 +1019,11 @@ body.gm-resizing * { cursor: col-resize !important; }
   font: 500 12px/1 var(--font-mono); color: var(--text-3);
 }
 .gm-source-filename { margin-left: 2px; }
+.gm-source-badge {
+  margin-left: auto; padding: 2px 8px; border-radius: 999px;
+  background: var(--surface); border: 1px solid var(--border);
+  font: 500 10.5px/1.5 var(--font-ui); letter-spacing: .03em; color: var(--text-3);
+}
 .gm-source-editor { min-height: 60vh; display: flex; }
 .gm-source-editor .editor-surface { min-height: 60vh; width: 100%; background: transparent; }
 .gm-source-editor .cm-editor { height: 100%; width: 100%; outline: none; background: transparent; }
@@ -1016,6 +1101,19 @@ body.gm-resizing * { cursor: col-resize !important; }
 .gm-rail-empty { font: 400 13px/1.5 var(--font-ui); color: var(--text-3); }
 .gm-rail-heading { display: flex; align-items: center; gap: 7px; margin-bottom: 12px; }
 .gm-pill { font: 500 10.5px/1 var(--font-mono); color: var(--text-3); background: var(--surface-2); border-radius: 9999px; padding: 2px 7px; }
+
+/* Rail frontmatter block: the raw YAML, collapsible so a long header can be
+   folded away without hiding the sections below it. */
+.gm-frontmatter > summary { cursor: pointer; list-style: none; user-select: none; }
+.gm-frontmatter > summary::-webkit-details-marker { display: none; }
+.gm-frontmatter > summary::before { content: '▾ '; color: var(--text-3); }
+.gm-frontmatter:not([open]) > summary::before { content: '▸ '; }
+.gm-frontmatter-body {
+  margin: 0; padding: 10px 12px; max-height: 320px; overflow: auto;
+  background: var(--surface-2); border: 1px solid var(--border); border-radius: 8px;
+  font: 400 11.5px/1.65 var(--font-mono); color: var(--text-2);
+  white-space: pre-wrap; overflow-wrap: anywhere;
+}
 
 /* Shared facet badge lists (rail Filters block + graph options pane). */
 .gm-facet-filters { display: flex; flex-direction: column; gap: 18px; }
@@ -1419,4 +1517,69 @@ body.gm-resizing * { cursor: col-resize !important; }
   .gm-type-manager-select { margin-left: 0; flex: 1 1 100%; }
   .gm-type-manager-select select { min-width: 0; }
   .gm-workspace-list { border-right: none; border-bottom: 1px solid var(--border); max-height: 220px; }
+}
+
+.gm-composite {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.gm-composite-intro {
+  margin: 0;
+  color: var(--gm-text-muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.gm-composite-error {
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: var(--gm-danger-soft, rgba(220, 80, 80, 0.12));
+  color: var(--gm-danger, #d05050);
+  font-size: 12px;
+}
+
+.gm-composite-members {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.gm-composite-member {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 10px;
+  border: 1px solid var(--gm-border);
+  border-radius: 6px;
+}
+
+.gm-composite-member.missing {
+  opacity: 0.65;
+}
+
+.gm-composite-member-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.gm-composite-prefix {
+  margin-left: 6px;
+  font-size: 11px;
+  color: var(--gm-text-muted);
+}
+
+.gm-composite-missing {
+  color: var(--gm-danger, #d05050);
+}
+
+.gm-composite-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
 }

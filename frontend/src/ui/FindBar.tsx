@@ -27,8 +27,12 @@ type FindBarProps = {
 const ALL_HIGHLIGHT = 'gm-find';
 const ACTIVE_HIGHLIGHT = 'gm-find-active';
 
-type HighlightRegistry = {set: (name: string, highlight: unknown) => void; delete: (name: string) => void};
-type HighlightCtor = new (...ranges: Range[]) => unknown;
+// A Highlight is setlike: it owns a mutable set of Ranges. We keep one instance
+// per highlight name for the lifetime of the bar and mutate it in place rather
+// than constructing a replacement on every keystroke — see `paint` for why.
+type HighlightSet = {clear: () => void; add: (range: Range) => void};
+type HighlightRegistry = {set: (name: string, highlight: HighlightSet) => void; delete: (name: string) => void};
+type HighlightCtor = new (...ranges: Range[]) => HighlightSet;
 
 function highlightRegistry(): HighlightRegistry | undefined {
   if (typeof CSS === 'undefined') {
@@ -37,9 +41,9 @@ function highlightRegistry(): HighlightRegistry | undefined {
   return (CSS as unknown as {highlights?: HighlightRegistry}).highlights;
 }
 
-function makeHighlight(ranges: Range[]): unknown {
+function makeHighlight(): HighlightSet | undefined {
   const ctor = (globalThis as unknown as {Highlight?: HighlightCtor}).Highlight;
-  return ctor ? new ctor(...ranges) : undefined;
+  return ctor ? new ctor() : undefined;
 }
 
 // Walk the text nodes under `root` and return a Range for every (case-insensitive)
@@ -86,31 +90,47 @@ export function FindBar({containerRef, contentKey}: FindBarProps) {
   const queryRef = useRef(query);
   queryRef.current = query;
 
-  const clearHighlights = useCallback(() => {
+  // One Highlight instance per name, created lazily and then reused. Replacing the
+  // registry entry with a freshly constructed Highlight on every keystroke is not
+  // enough: the displaced object still holds its Ranges, and WebKit keeps painting
+  // them until it is collected, so highlights for every prefix the user typed
+  // ("s", "ss", …) pile up on top of the current query's. Mutating one instance
+  // means there is never an orphan to leak.
+  const allRef = useRef<HighlightSet | null>(null);
+  const activeRef = useRef<HighlightSet | null>(null);
+
+  const highlightFor = useCallback((ref: RefObject<HighlightSet | null>, name: string) => {
     const registry = highlightRegistry();
-    registry?.delete(ALL_HIGHLIGHT);
-    registry?.delete(ACTIVE_HIGHLIGHT);
+    if (!registry) {
+      return undefined;
+    }
+    if (!ref.current) {
+      const created = makeHighlight();
+      if (!created) {
+        return undefined;
+      }
+      ref.current = created;
+      registry.set(name, created);
+    }
+    return ref.current;
+  }, []);
+
+  const clearHighlights = useCallback(() => {
+    allRef.current?.clear();
+    activeRef.current?.clear();
   }, []);
 
   const paint = useCallback((ranges: Range[], index: number) => {
-    const registry = highlightRegistry();
-    if (!registry) {
-      return;
-    }
+    const all = highlightFor(allRef, ALL_HIGHLIGHT);
+    const active = highlightFor(activeRef, ACTIVE_HIGHLIGHT);
+    all?.clear();
+    active?.clear();
     if (ranges.length === 0) {
-      registry.delete(ALL_HIGHLIGHT);
-      registry.delete(ACTIVE_HIGHLIGHT);
       return;
     }
-    const all = makeHighlight(ranges);
-    const active = makeHighlight([ranges[index]]);
-    if (all) {
-      registry.set(ALL_HIGHLIGHT, all);
-    }
-    if (active) {
-      registry.set(ACTIVE_HIGHLIGHT, active);
-    }
-  }, []);
+    ranges.forEach((range) => all?.add(range));
+    active?.add(ranges[index]);
+  }, [highlightFor]);
 
   const scrollTo = useCallback((range: Range) => {
     const container = containerRef.current;
@@ -192,8 +212,17 @@ export function FindBar({containerRef, contentKey}: FindBarProps) {
     return () => cancelAnimationFrame(id);
   }, [open, contentKey, recompute]);
 
-  // Clear any painted highlights if the bar unmounts (e.g. leaving the read view).
-  useEffect(() => clearHighlights, [clearHighlights]);
+  // Drop the highlights when the bar unmounts (e.g. leaving the read view) so no
+  // painted ranges outlive the component.
+  useEffect(() => () => {
+    const registry = highlightRegistry();
+    allRef.current?.clear();
+    activeRef.current?.clear();
+    registry?.delete(ALL_HIGHLIGHT);
+    registry?.delete(ACTIVE_HIGHLIGHT);
+    allRef.current = null;
+    activeRef.current = null;
+  }, []);
 
   const onQueryChange = useCallback((value: string) => {
     setQuery(value);

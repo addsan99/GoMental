@@ -19,6 +19,7 @@ import (
 	"sync"
 	"time"
 
+	"GoMental/internal/composite"
 	"GoMental/internal/domain"
 	"GoMental/internal/graph"
 	"GoMental/internal/importers"
@@ -93,6 +94,10 @@ type SaveNoteRequest struct {
 	BaseVersion string `json:"baseVersion,omitempty"`
 	// Force bypasses the version check even when BaseVersion is set.
 	Force bool `json:"force,omitempty"`
+	// Member names the composite member a *new* note should be written to, by
+	// prefix. Ignored for an ID that already resolves to a member, and on an
+	// ordinary workspace.
+	Member string `json:"member,omitempty"`
 }
 
 type MoveNoteRequest struct {
@@ -102,6 +107,9 @@ type MoveNoteRequest struct {
 
 type ImportURLRequest struct {
 	URL string `json:"url"`
+	// Member names the composite member to import into, by prefix. Empty means
+	// the composite's first member.
+	Member string `json:"member,omitempty"`
 }
 
 // CreateNoteRequest drives the agent-ergonomic create endpoint.
@@ -111,6 +119,9 @@ type CreateNoteRequest struct {
 	// Mode selects collision behavior: "create" (default; fail if the id exists),
 	// "upsert" (write regardless), or "unique" (auto-suffix the id to a free one).
 	Mode string `json:"mode"`
+	// Member names the composite member to create the note in, by prefix. Empty
+	// means the composite's first member.
+	Member string `json:"member,omitempty"`
 }
 
 type SaveNoteAssetRequest struct {
@@ -306,6 +317,7 @@ type RebuildResultDTO struct {
 type RecentWorkspaceDTO struct {
 	Path     string `json:"path"`
 	OpenedAt string `json:"openedAt"`
+	Starred  bool   `json:"starred"`
 }
 
 type UIState map[string]any
@@ -319,7 +331,9 @@ type Settings struct {
 }
 
 type AppearanceSettings struct {
-	Theme string `json:"theme"`
+	Theme       string  `json:"theme"`
+	ReadingFont string  `json:"readingFont"`
+	DefaultZoom float64 `json:"defaultZoom"`
 }
 
 type NoteViewSettings struct {
@@ -336,6 +350,7 @@ type WorkspaceSettings struct {
 	DefaultType    string                 `json:"defaultType"`
 	EnabledTypes   []string               `json:"enabledTypes"`
 	AccessMode     string                 `json:"accessMode"`
+	Starred        bool                   `json:"starred,omitempty"`
 	GitURL         string                 `json:"gitUrl,omitempty"`
 	GitBaseRef     string                 `json:"gitBaseRef,omitempty"`
 	GitPath        string                 `json:"gitPath,omitempty"`
@@ -629,6 +644,14 @@ func (s *Service) SaveNote(ctx context.Context, req SaveNoteRequest) (NoteDTO, e
 	if err != nil {
 		return NoteDTO{}, appErr("notes.invalid_id", "Invalid note id", err)
 	}
+	// A composite owns no files of its own, so a bare ID has nowhere to land
+	// until it names a member. Saves of existing notes already carry a
+	// namespaced ID and pass through untouched; this is what lets the editor
+	// create a note in a composite at all.
+	noteID, err = ws.QualifyNewNoteIDIn(noteID, req.Member)
+	if err != nil {
+		return NoteDTO{}, appErr("notes.invalid_id", "Could not place the note in a member workspace", err)
+	}
 	// Serialize concurrent writes to the same note; different notes stay parallel.
 	unlock := s.lockNote(noteID)
 	defer unlock()
@@ -744,6 +767,10 @@ func (s *Service) CreateNote(ctx context.Context, req CreateNoteRequest) (NoteDT
 	if err != nil {
 		return NoteDTO{}, appErr("notes.invalid_id", "Invalid note id", err)
 	}
+	noteID, err = ws.QualifyNewNoteIDIn(noteID, req.Member)
+	if err != nil {
+		return NoteDTO{}, appErr("notes.invalid_id", "Could not place the new note in a member workspace", err)
+	}
 	repo, searchIndex, graphStore, err := s.sessionSnapshot()
 	if err != nil {
 		return NoteDTO{}, err
@@ -786,6 +813,10 @@ func (s *Service) CreateNote(ctx context.Context, req CreateNoteRequest) (NoteDT
 }
 
 func (s *Service) ImportURL(ctx context.Context, req ImportURLRequest) (NoteDTO, error) {
+	ws, err := s.workspaceSnapshot()
+	if err != nil {
+		return NoteDTO{}, err
+	}
 	repo, searchIndex, graphStore, err := s.sessionSnapshot()
 	if err != nil {
 		return NoteDTO{}, err
@@ -808,6 +839,12 @@ func (s *Service) ImportURL(ctx context.Context, req ImportURLRequest) (NoteDTO,
 			return NoteDTO{}, appErr("import.unsupported", "No importer could handle this URL", err)
 		}
 		return NoteDTO{}, appErr("import.failed", "Could not import URL", err)
+	}
+	// The importer names the note after its source, with no idea that the
+	// workspace might span several roots.
+	result.Document.ID, err = ws.QualifyNewNoteIDIn(result.Document.ID, req.Member)
+	if err != nil {
+		return NoteDTO{}, appErr("import.note_id_failed", "Could not place the imported note in a member workspace", err)
 	}
 	result.Document.ID, err = uniqueImportedNoteID(ctx, repo, result.Document.ID)
 	if err != nil {
@@ -859,7 +896,11 @@ func (s *Service) SaveNoteAsset(ctx context.Context, req SaveNoteAssetRequest) (
 		return SaveNoteAssetResponse{}, appErr("asset.unsupported_type", "Unsupported image type", fmt.Errorf("%s", req.MIMEType))
 	}
 	fileName := uniqueAssetFileName(req.FileName, mimeType)
-	assetDir := filepath.Join(ws.Root(), "assets", filepath.FromSlash(string(noteID)))
+	assetRoot, assetKey, err := noteAssetRoot(ws, noteID)
+	if err != nil {
+		return SaveNoteAssetResponse{}, appErr("asset.note_path_failed", "Could not resolve the workspace that owns this note", err)
+	}
+	assetDir := filepath.Join(assetRoot, "assets", filepath.FromSlash(string(assetKey)))
 	if err := os.MkdirAll(assetDir, 0o755); err != nil {
 		return SaveNoteAssetResponse{}, appErr("asset.mkdir_failed", "Could not create asset folder", err)
 	}
@@ -874,7 +915,7 @@ func (s *Service) SaveNoteAsset(ctx context.Context, req SaveNoteAssetRequest) (
 		base := strings.TrimSuffix(fileName, ext)
 		assetPath = filepath.Join(assetDir, fmt.Sprintf("%s-%d%s", base, i, ext))
 	}
-	if err := ensurePathInside(ws.Root(), assetPath); err != nil {
+	if err := ensurePathInside(assetRoot, assetPath); err != nil {
 		return SaveNoteAssetResponse{}, appErr("asset.path_escape", "Asset path escapes workspace", err)
 	}
 	if err := os.WriteFile(assetPath, data, 0o644); err != nil {
@@ -963,6 +1004,10 @@ func (s *Service) MoveNote(ctx context.Context, req MoveNoteRequest) (NoteDTO, e
 	newID, err := ws.NormalizeNoteID(req.NewID)
 	if err != nil {
 		return NoteDTO{}, appErr("notes.invalid_id", "Invalid target note id", err)
+	}
+	newID, err = ws.QualifyRenamedNoteID(oldID, newID)
+	if err != nil {
+		return NoteDTO{}, appErr("notes.invalid_id", "Could not place the renamed note in a member workspace", err)
 	}
 	if oldID == newID {
 		return s.ReadNote(ctx, string(newID))
@@ -1058,11 +1103,11 @@ func (s *Service) SuggestLinks(ctx context.Context, input SuggestLinksRequest) (
 	if idx == nil {
 		return SuggestLinksResponse{}, appErr("suggestions.unavailable", "Suggestions are not ready", nil)
 	}
-	parsed, err := okf.NewCodec().Decode(id, input.Content, time.Time{})
+	parsed, err := composite.Decode(ws, id, input.Content, time.Time{})
 	if err != nil {
 		return SuggestLinksResponse{}, appErr(ErrOKFDecodeFailed, "Could not decode draft", err)
 	}
-	parsed.Links = okf.NewResolver(idx.ResolverIDs()).ResolveLinks(id, parsed.Links)
+	parsed.Links = composite.ResolveOne(ws, id, parsed.Links, idx.ResolverIDs())
 	queryText := suggestionQueryText(parsed)
 	results, err := searchIndex.Search(ctx, domain.SearchQuery{Text: queryText, Limit: 50})
 	if err != nil {
@@ -1291,7 +1336,7 @@ func (s *Service) ExpandContext(ctx context.Context, id string, depth int) (Expa
 	if err != nil {
 		return ExpandContextDTO{}, appErr("notes.read_failed", "Could not read note", err)
 	}
-	focusParsed, err := okf.NewCodec().Decode(focus.ID, focus.Document.Raw, focus.ModifiedAt)
+	focusParsed, err := composite.Decode(repo.Workspace(), focus.ID, focus.Document.Raw, focus.ModifiedAt)
 	if err != nil {
 		return ExpandContextDTO{}, appErr(ErrOKFDecodeFailed, "Could not parse note", err)
 	}
@@ -1329,7 +1374,7 @@ func (s *Service) ExpandContext(ctx context.Context, id string, depth int) (Expa
 		}
 		excerpt := ""
 		title := n.Label // graph label falls back to the id; prefer the parsed title
-		if parsed, derr := okf.NewCodec().Decode(neighbor.ID, neighbor.Document.Raw, neighbor.ModifiedAt); derr == nil {
+		if parsed, derr := composite.Decode(repo.Workspace(), neighbor.ID, neighbor.Document.Raw, neighbor.ModifiedAt); derr == nil {
 			excerpt = truncateRunes(parsed.PlainText, expandExcerptRunes)
 			if parsed.Title != "" {
 				title = parsed.Title
@@ -1351,7 +1396,7 @@ func readParsed(ctx context.Context, repo *workspace.FileNoteRepository, id stri
 	if err != nil {
 		return domain.ParsedOKFNote{}, appErr("notes.read_failed", "Could not read note", err)
 	}
-	parsed, err := okf.NewCodec().Decode(note.ID, note.Document.Raw, note.ModifiedAt)
+	parsed, err := composite.Decode(repo.Workspace(), note.ID, note.Document.Raw, note.ModifiedAt)
 	if err != nil {
 		return domain.ParsedOKFNote{}, appErr(ErrOKFDecodeFailed, "Could not parse note", err)
 	}
@@ -1444,15 +1489,48 @@ func (s *Service) Rebuild(ctx context.Context) (RebuildResultDTO, error) {
 	return dto, nil
 }
 
+// RecentWorkspaces lists the workspaces offered in the open-workspace menu:
+// every starred workspace, then the most recently opened ones. Starred entries
+// are included even when they have aged out of the recent file, which is the
+// point of starring; both sets are filtered to roots that still exist on disk.
 func (s *Service) RecentWorkspaces(ctx context.Context) ([]RecentWorkspaceDTO, error) {
 	items, err := s.recentStore.List(ctx)
 	if err != nil {
 		return nil, appErr("workspace.recent_failed", "Could not read recent workspaces", err)
 	}
-	out := make([]RecentWorkspaceDTO, len(items))
-	for i, item := range items {
-		out[i] = RecentWorkspaceDTO{Path: item.Path, OpenedAt: item.OpenedAt.Format(timeFormat)}
+	// Settings are advisory here: a starred workspace is a nicety, so a broken
+	// settings file should not take the recent list down with it.
+	starred := map[string]bool{}
+	if settings, settingsErr := s.LoadSettings(ctx); settingsErr == nil {
+		for root, ws := range settings.Workspaces {
+			if ws.Starred {
+				starred[filepath.Clean(root)] = true
+			}
+		}
 	}
+	out := make([]RecentWorkspaceDTO, 0, len(items)+len(starred))
+	seen := map[string]bool{}
+	for _, item := range items {
+		clean := filepath.Clean(item.Path)
+		seen[clean] = true
+		out = append(out, RecentWorkspaceDTO{
+			Path:     item.Path,
+			OpenedAt: item.OpenedAt.Format(timeFormat),
+			Starred:  starred[clean],
+		})
+	}
+	missingStars := make([]string, 0, len(starred))
+	for root := range starred {
+		if !seen[root] && workspace.RootExists(root) {
+			missingStars = append(missingStars, root)
+		}
+	}
+	sort.Strings(missingStars)
+	for _, root := range missingStars {
+		out = append(out, RecentWorkspaceDTO{Path: root, Starred: true})
+	}
+	// Stable so the recency order survives within each group.
+	sort.SliceStable(out, func(i, j int) bool { return out[i].Starred && !out[j].Starred })
 	return out, nil
 }
 
@@ -1722,16 +1800,22 @@ func movedImageSource(ws workspace.Workspace, oldID domain.NoteID, newID domain.
 		return raw, false
 	}
 	var target string
+	// Root-anchored links are relative to the workspace that holds the note,
+	// which on a composite is the owning member.
+	assetRoot, _, aerr := noteAssetRoot(ws, oldID)
+	if aerr != nil {
+		return raw, false
+	}
 	switch {
 	case strings.HasPrefix(pathPart, "/"):
-		target = filepath.Join(ws.Root(), filepath.FromSlash(strings.TrimPrefix(pathPart, "/")))
+		target = filepath.Join(assetRoot, filepath.FromSlash(strings.TrimPrefix(pathPart, "/")))
 	case strings.HasPrefix(pathPart, `\`):
-		target = filepath.Join(ws.Root(), filepath.FromSlash(strings.TrimLeft(strings.ReplaceAll(pathPart, `\`, "/"), "/")))
+		target = filepath.Join(assetRoot, filepath.FromSlash(strings.TrimLeft(strings.ReplaceAll(pathPart, `\`, "/"), "/")))
 	default:
 		target = filepath.Join(filepath.Dir(oldNotePath), filepath.FromSlash(strings.ReplaceAll(pathPart, `\`, "/")))
 	}
 	target = filepath.Clean(target)
-	if err := ensurePathInside(ws.Root(), target); err != nil {
+	if err := ensurePathInside(assetRoot, target); err != nil {
 		return raw, false
 	}
 	rel, err := filepath.Rel(filepath.Dir(newNotePath), target)
@@ -1775,7 +1859,11 @@ func resolveNoteAssetPath(ws workspace.Workspace, noteID domain.NoteID, raw stri
 	}
 	joined := filepath.Join(filepath.Dir(notePath), filepath.FromSlash(strings.ReplaceAll(raw, `\`, "/")))
 	clean := filepath.Clean(joined)
-	if err := ensurePathInside(ws.Root(), clean); err != nil {
+	assetRoot, _, err := noteAssetRoot(ws, noteID)
+	if err != nil {
+		return "", err
+	}
+	if err := ensurePathInside(assetRoot, clean); err != nil {
 		return "", err
 	}
 	return clean, nil
@@ -1857,6 +1945,22 @@ func uniqueImportedNoteID(ctx context.Context, repo *workspace.FileNoteRepositor
 	}
 }
 
+// noteAssetRoot answers "which directory tree do this note's images live in?".
+// On a composite that is the member that owns the note, not the composite root:
+// the composite holds only projections, so an asset written beneath it would
+// sit outside every workspace and its relative link from the note would climb
+// out of the corpus entirely.
+func noteAssetRoot(ws workspace.Workspace, noteID domain.NoteID) (string, domain.NoteID, error) {
+	if !ws.IsComposite() {
+		return ws.Root(), noteID, nil
+	}
+	member, memberID, err := ws.MemberForNoteID(noteID)
+	if err != nil {
+		return "", "", err
+	}
+	return member.Root(), memberID, nil
+}
+
 func ensurePathInside(root string, path string) error {
 	abs, err := filepath.Abs(path)
 	if err != nil {
@@ -1880,7 +1984,9 @@ func defaultSettings() Settings {
 	return Settings{
 		Version: 3,
 		Appearance: AppearanceSettings{
-			Theme: "dark",
+			Theme:       "dark",
+			ReadingFont: "newsreader",
+			DefaultZoom: 1,
 		},
 		NoteView: NoteViewSettings{
 			DefaultEditMode: "rich",
@@ -1910,16 +2016,26 @@ func normalizeSettings(settings Settings) Settings {
 	if settings.Appearance.Theme == "" {
 		settings.Appearance.Theme = defaults.Appearance.Theme
 	}
+	settings.Appearance.ReadingFont = strings.TrimSpace(settings.Appearance.ReadingFont)
+	if !isReadingFont(settings.Appearance.ReadingFont) {
+		settings.Appearance.ReadingFont = defaults.Appearance.ReadingFont
+	}
+	if settings.Appearance.DefaultZoom < 0.75 || settings.Appearance.DefaultZoom > 2 {
+		settings.Appearance.DefaultZoom = defaults.Appearance.DefaultZoom
+	}
 	if settings.NoteView.DefaultEditMode != "source" && settings.NoteView.DefaultEditMode != "rich" {
 		settings.NoteView.DefaultEditMode = defaults.NoteView.DefaultEditMode
 	}
 	if settings.GraphView.DefaultMode != "3d" && settings.GraphView.DefaultMode != "2d" {
 		settings.GraphView.DefaultMode = defaults.GraphView.DefaultMode
 	}
-	if settings.GraphView.DefaultDepth < 1 {
+	// Depth is either a hop count (1..4) or the negative "unbounded" sentinel,
+	// so it is normalised rather than clamped into a range.
+	if settings.GraphView.DefaultDepth < 0 {
+		settings.GraphView.DefaultDepth = domain.GraphDepthUnbounded
+	} else if settings.GraphView.DefaultDepth < 1 {
 		settings.GraphView.DefaultDepth = defaults.GraphView.DefaultDepth
-	}
-	if settings.GraphView.DefaultDepth > 4 {
+	} else if settings.GraphView.DefaultDepth > 4 {
 		settings.GraphView.DefaultDepth = 4
 	}
 	if settings.Workspaces == nil {
@@ -1941,6 +2057,15 @@ func normalizeSettings(settings Settings) Settings {
 		settings.Workspaces[trimmedPath] = normalizedWorkspaceSettings
 	}
 	return settings
+}
+
+func isReadingFont(value string) bool {
+	switch strings.TrimSpace(value) {
+	case "newsreader", "open-sans", "calibri", "roboto", "georgia", "system-serif", "system-sans":
+		return true
+	default:
+		return false
+	}
 }
 
 func normalizeWorkspaceSettings(settings WorkspaceSettings) WorkspaceSettings {
@@ -2509,10 +2634,7 @@ func updateIncrementalProjections(ctx context.Context, repo *workspace.FileNoteR
 		parsedByID[note.ID] = note
 		ids[i] = note.ID
 	}
-	resolver := okf.NewResolver(ids)
-	for i := range corpus {
-		corpus[i].Links = resolver.ResolveLinks(corpus[i].ID, corpus[i].Links)
-	}
+	composite.ResolveAll(repo.Workspace(), corpus)
 	changedSet := map[domain.NoteID]struct{}{}
 	for _, id := range changed {
 		changedSet[id] = struct{}{}
@@ -2586,8 +2708,7 @@ func updateIncrementalProjections(ctx context.Context, repo *workspace.FileNoteR
 // filesystem walk. Soft-link inference is scheduled separately off the hot path.
 // This keeps save latency independent of corpus size.
 func updateOneProjectionFast(ctx context.Context, repo *workspace.FileNoteRepository, searchIndex *search.BleveIndex, graphStore *graph.SQLiteStore, corpus *liveCorpus, note domain.Note) error {
-	codec := okf.NewCodec()
-	parsed, err := codec.Decode(note.ID, note.Document.Raw, note.ModifiedAt)
+	parsed, err := composite.Decode(repo.Workspace(), note.ID, note.Document.Raw, note.ModifiedAt)
 	if err != nil {
 		return err
 	}
@@ -2597,8 +2718,7 @@ func updateOneProjectionFast(ctx context.Context, repo *workspace.FileNoteReposi
 	if err != nil {
 		return err
 	}
-	resolver := okf.NewResolver(ids)
-	parsed.Links = resolver.ResolveLinks(parsed.ID, parsed.Links)
+	parsed.Links = composite.ResolveOne(repo.Workspace(), parsed.ID, parsed.Links, ids)
 	if err := searchIndex.Index(ctx, domain.SearchDocumentFromParsed(parsed, domain.NotePath(string(parsed.ID)+".md"))); err != nil {
 		return err
 	}
@@ -2631,8 +2751,7 @@ func resolverIDs(ctx context.Context, corpus *liveCorpus, repo *workspace.FileNo
 }
 
 func updateOneProjection(ctx context.Context, repo *workspace.FileNoteRepository, searchIndex *search.BleveIndex, graphStore *graph.SQLiteStore, live *liveCorpus, note domain.Note) error {
-	codec := okf.NewCodec()
-	parsed, err := codec.Decode(note.ID, note.Document.Raw, note.ModifiedAt)
+	parsed, err := composite.Decode(repo.Workspace(), note.ID, note.Document.Raw, note.ModifiedAt)
 	if err != nil {
 		return err
 	}
@@ -2647,8 +2766,7 @@ func updateOneProjection(ctx context.Context, repo *workspace.FileNoteRepository
 	for i, parsedNote := range corpus {
 		ids[i] = parsedNote.ID
 	}
-	resolver := okf.NewResolver(ids)
-	parsed.Links = resolver.ResolveLinks(parsed.ID, parsed.Links)
+	parsed.Links = composite.ResolveOne(repo.Workspace(), parsed.ID, parsed.Links, ids)
 	if err := searchIndex.Index(ctx, domain.SearchDocumentFromParsed(parsed, domain.NotePath(string(parsed.ID)+".md"))); err != nil {
 		return err
 	}
@@ -2674,14 +2792,14 @@ func parseCorpus(ctx context.Context, repo *workspace.FileNoteRepository) ([]dom
 	if err != nil {
 		return nil, err
 	}
-	codec := okf.NewCodec()
+	ws := repo.Workspace()
 	var parsed []domain.ParsedOKFNote
 	for _, summary := range summaries {
 		note, err := repo.Read(ctx, summary.ID)
 		if err != nil {
 			return nil, err
 		}
-		parsedNote, err := codec.Decode(note.ID, note.Document.Raw, note.ModifiedAt)
+		parsedNote, err := composite.Decode(ws, note.ID, note.Document.Raw, note.ModifiedAt)
 		if err == nil {
 			parsed = append(parsed, parsedNote)
 		}

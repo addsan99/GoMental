@@ -494,16 +494,21 @@ func (s *SQLiteStore) FullGraph(ctx context.Context, filter domain.GraphFilter) 
 
 // Query is the unified graph selection backing both the neighborhood and
 // full-graph views (see domain.GraphQuery). When Seed is nil it selects the full
-// note set; when Seed is set it selects the depth-bounded neighborhood around it.
-// In both cases the metadata predicates (Types/Tags/PathPrefix) restrict which
-// note nodes are kept. Unlike the legacy Neighborhood, a seeded Query honors
-// IncludeMetadataLinks: facet-hub edges from the kept notes are included when
-// requested — closing the "metadata links do nothing when a note is selected"
-// gap. Metadata hubs are never traversed for reachability.
+// note set; when Seed is set it selects the depth-bounded neighborhood around it,
+// or the full note set when the depth is unbounded (negative). In both cases the
+// metadata predicates (Types/Tags/PathPrefix) restrict which note nodes are kept.
+// Unlike the legacy Neighborhood, a seeded Query honors IncludeMetadataLinks:
+// facet-hub edges from the kept notes are included when requested — closing the
+// "metadata links do nothing when a note is selected" gap. Metadata hubs are
+// never traversed for reachability.
 func (s *SQLiteStore) Query(ctx context.Context, q domain.GraphQuery) (domain.Graph, error) {
 	// Reachable node-id set for a seeded neighborhood; nil means "full graph".
 	var frontier map[string]struct{}
-	if q.MetadataSeed != "" {
+	switch {
+	case q.Depth < 0:
+		// Unbounded: the seed still focuses the view for the caller, but no hop
+		// limit applies, so leave the frontier nil to select every note.
+	case q.MetadataSeed != "":
 		depth := q.Depth
 		if depth <= 0 {
 			depth = 1
@@ -513,7 +518,7 @@ func (s *SQLiteStore) Query(ctx context.Context, q domain.GraphQuery) (domain.Gr
 			return domain.Graph{}, err
 		}
 		frontier = f
-	} else if q.Seed != nil {
+	case q.Seed != nil:
 		depth := q.Depth
 		if depth <= 0 {
 			depth = 1
@@ -533,7 +538,43 @@ func (s *SQLiteStore) Query(ctx context.Context, q domain.GraphQuery) (domain.Gr
 	if err != nil {
 		return domain.Graph{}, err
 	}
+	edges = pruneSingletonHeadingHubs(edges, q.MetadataSeed)
 	return graphFromEdgesAndNodes(edges, baseNodes, q.IncludeUnresolved), nil
+}
+
+// pruneSingletonHeadingHubs drops shared-heading edges whose hub is joined to
+// fewer than two of the selected notes. The hub means "these notes share this
+// heading", so one with a single member states nothing the note did not already
+// state — it is a leaf hanging off one note.
+//
+// They also dominate the node count. Unlike tags and types, whose vocabulary is
+// small and curated, heading hubs are one per distinct heading text: a 196-note
+// workspace produced 4422 of them, 94% with a single member, so turning metadata
+// links on grew the graph to twenty times the number of notes.
+//
+// The count is taken over the selected edges rather than the whole store so the
+// rendered graph stays self-consistent: a hub is kept exactly when the user can
+// see it joining two notes. An explicitly seeded hub is always kept, since the
+// user asked for that one by name.
+func pruneSingletonHeadingHubs(edges []domain.GraphEdge, metadataSeed string) []domain.GraphEdge {
+	members := map[string]map[string]struct{}{}
+	for _, edge := range edges {
+		if edge.Kind != domain.GraphEdgeSharedHeading {
+			continue
+		}
+		if members[edge.Target] == nil {
+			members[edge.Target] = map[string]struct{}{}
+		}
+		members[edge.Target][edge.Source] = struct{}{}
+	}
+	out := edges[:0]
+	for _, edge := range edges {
+		if edge.Kind == domain.GraphEdgeSharedHeading && edge.Target != metadataSeed && len(members[edge.Target]) < 2 {
+			continue
+		}
+		out = append(out, edge)
+	}
+	return out
 }
 
 // frontier returns the set of node ids within depth hops of seed, traversing

@@ -4,7 +4,7 @@ import {
   DeleteNote,
   FullGraph,
   GraphQuery,
-  ImportURL,
+  ImportURL as ImportURLBinding,
   Info,
   ListNotes,
   ListNotesPage,
@@ -25,14 +25,14 @@ import {
   SelectWorkspaceDirectory,
 } from '../../wailsjs/go/main/App'
 import {EventsOn} from '../../wailsjs/runtime/runtime'
-import type {GitPRResult, GitSyncResult, GoMentalSettings, MoveNoteRequest, NoteDTOWithVersion, NoteType, SaveNoteRequestWithVersion, SetNoteFavoriteRequest, SuggestLinksRequest, SuggestLinksResponse} from './types'
+import type {application} from '../../wailsjs/go/models'
+import type {GitPRResult, GitSyncResult, GoMentalComposite, GoMentalSettings, GoMentalWorkspaceMember, ImportURLRequestWithMember, MoveNoteRequest, NoteDTOWithVersion, NoteType, SaveNoteRequestWithVersion, SetNoteFavoriteRequest, SuggestLinksRequest, SuggestLinksResponse} from './types'
 
 export {
   Backlinks,
   DeleteNote,
   FullGraph,
   GraphQuery,
-  ImportURL,
   Info,
   ListNotes,
   ListNotesPage,
@@ -55,6 +55,10 @@ export {
 // so App.tsx can thread `version`/`baseVersion`/`force` through.
 export function ReadNote(id: string): Promise<NoteDTOWithVersion> {
   return ReadNoteBinding(id)
+}
+
+export function ImportURL(req: ImportURLRequestWithMember): Promise<application.NoteDTO> {
+  return ImportURLBinding(req as any)
 }
 
 export function SaveNote(req: SaveNoteRequestWithVersion): Promise<NoteDTOWithVersion> {
@@ -143,4 +147,28 @@ export function ImportNoteTypeCollection(content: string): Promise<NoteType[]> {
 
 export function onEvent(name: string, cb: (...data: any[]) => void): () => void {
   return EventsOn(name, cb)
+}
+
+export function Composite(): Promise<GoMentalComposite> {
+  const app = (window as any)?.go?.main?.App
+  if (!app || typeof app.Composite !== 'function') {
+    return Promise.reject(new Error('composite workspaces are not available in this build'))
+  }
+  return app.Composite()
+}
+
+export function WorkspaceMembers(): Promise<GoMentalWorkspaceMember[]> {
+  const app = (window as any)?.go?.main?.App
+  if (!app || typeof app.WorkspaceMembers !== 'function') {
+    return Promise.resolve([])
+  }
+  return app.WorkspaceMembers()
+}
+
+export function SaveComposite(memberRoots: string[]): Promise<GoMentalComposite> {
+  const app = (window as any)?.go?.main?.App
+  if (!app || typeof app.SaveComposite !== 'function') {
+    return Promise.reject(new Error('composite workspaces are not available in this build'))
+  }
+  return app.SaveComposite(memberRoots)
 }

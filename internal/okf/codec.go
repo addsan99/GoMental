@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"GoMental/internal/domain"
+	"GoMental/internal/ingest"
 
 	"gopkg.in/yaml.v3"
 )
@@ -16,6 +17,13 @@ type Codec struct {
 
 func NewCodec() Codec {
 	return Codec{parser: NewParser()}
+}
+
+// NewCodecWithMapping returns a codec that decodes under a workspace's ingest
+// profile. Encoding does not consult the profile, so writers that only encode
+// can keep using NewCodec.
+func NewCodecWithMapping(mapping ingest.Mapping) Codec {
+	return Codec{parser: NewParserWithMapping(mapping)}
 }
 
 func (c Codec) Decode(id domain.NoteID, raw string, modifiedAt time.Time) (domain.ParsedOKFNote, error) {

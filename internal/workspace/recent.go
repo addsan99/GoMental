@@ -37,6 +37,11 @@ func DefaultRecentWorkspaceStore() (RecentWorkspaceStore, error) {
 	return NewRecentWorkspaceStore(filepath.Join(configDir, "GoMental", "recent-workspaces.json"), DefaultRecentWorkspaceLimit), nil
 }
 
+// List returns the recent workspaces that still resolve to a directory on disk.
+// Entries whose root has since been deleted are filtered out rather than
+// removed from the file: a workspace on an unmounted volume should reappear
+// once the volume is back, and offering a menu entry that cannot be opened is
+// worse than briefly hiding one that can.
 func (s RecentWorkspaceStore) List(ctx context.Context) ([]RecentWorkspace, error) {
 	select {
 	case <-ctx.Done():
@@ -47,7 +52,22 @@ func (s RecentWorkspaceStore) List(ctx context.Context) ([]RecentWorkspace, erro
 	if err != nil {
 		return nil, err
 	}
-	return items, nil
+	live := make([]RecentWorkspace, 0, len(items))
+	for _, item := range items {
+		if RootExists(item.Path) {
+			live = append(live, item)
+		}
+	}
+	return live, nil
+}
+
+// RootExists reports whether a workspace root is still a directory on disk.
+func RootExists(root string) bool {
+	if strings.TrimSpace(root) == "" {
+		return false
+	}
+	info, err := os.Stat(root)
+	return err == nil && info.IsDir()
 }
 
 func (s RecentWorkspaceStore) Add(ctx context.Context, root string) error {
@@ -66,14 +86,28 @@ func (s RecentWorkspaceStore) Add(ctx context.Context, root string) error {
 	}
 	canonical := ws.Root()
 	updated := []RecentWorkspace{{Path: canonical, OpenedAt: time.Now().UTC()}}
+	// Entries whose root is gone are kept, but only in slots the live entries do
+	// not want. Without this an agent's handful of deleted scratch workspaces
+	// would sit at the head of the file and evict every real one.
+	var missing []RecentWorkspace
 	for _, item := range items {
 		if samePath(item.Path, canonical) {
+			continue
+		}
+		if !RootExists(item.Path) {
+			missing = append(missing, item)
 			continue
 		}
 		updated = append(updated, item)
 		if len(updated) >= s.limit {
 			break
 		}
+	}
+	for _, item := range missing {
+		if len(updated) >= s.limit {
+			break
+		}
+		updated = append(updated, item)
 	}
 	return s.write(updated)
 }

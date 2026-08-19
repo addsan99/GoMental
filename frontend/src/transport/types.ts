@@ -68,6 +68,14 @@ export type NoteDTOWithVersion = application.NoteDTO & {
 export type SaveNoteRequestWithVersion = application.SaveNoteRequest & {
   baseVersion?: string
   force?: boolean
+  // Which member of a composite workspace a *new* note should be written to.
+  // Ignored when saving a note that already lives somewhere.
+  member?: string
+}
+
+// ImportURLRequest plus the composite destination member.
+export type ImportURLRequestWithMember = application.ImportURLRequest & {
+  member?: string
 }
 
 export type SetNoteFavoriteRequest = {
@@ -84,6 +92,8 @@ export type GoMentalSettings = {
   version: number
   appearance: {
     theme: string
+    readingFont: 'newsreader' | 'georgia' | 'system-serif' | 'system-sans' | 'open-sans' | 'calibri' | 'roboto'
+    defaultZoom: number
   }
   noteView: {
     defaultEditMode: 'rich' | 'source'
@@ -100,6 +110,7 @@ export type GoMentalWorkspaceSettings = {
   defaultType: string
   enabledTypes: string[]
   accessMode: 'editable' | 'readOnlyLocal' | 'readOnlyGit' | 'writableGit'
+  starred: boolean
   gitUrl: string
   gitBaseRef: string
   gitPath: string
@@ -144,4 +155,25 @@ export type NoteType = {
   description: string
   template: string
   source: string
+}
+
+export interface GoMentalCompositeMember {
+  root: string
+  name: string
+  prefix: string
+  missing: boolean
+}
+
+// A destination a new note can be written to. Empty on an ordinary workspace,
+// which is how the UI knows not to ask the question at all.
+export interface GoMentalWorkspaceMember {
+  prefix: string
+  root: string
+  name: string
+}
+
+export interface GoMentalComposite {
+  root: string
+  configured: boolean
+  members: GoMentalCompositeMember[]
 }

@@ -539,7 +539,7 @@ func (c *Core) reload(ctx context.Context) error {
 		safeSummaries = append(safeSummaries, summary)
 	}
 	summaries = safeSummaries
-	parser := okf.NewParser()
+	parser := okf.NewParserWithMapping(ws.Mapping())
 	parsed := make(map[domain.NoteID]domain.ParsedOKFNote, len(summaries))
 	ids := make([]domain.NoteID, 0, len(summaries))
 	for _, summary := range summaries {
