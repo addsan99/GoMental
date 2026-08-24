@@ -237,3 +237,39 @@ func TestMoveNoteAcrossMembersLeavesInboundLinksAlone(t *testing.T) {
 		t.Fatalf("cross-member move should not rewrite the link:\n%s", linker.Content)
 	}
 }
+
+// The destination picker decides whether a member can take a new note by looking
+// its root up in the per-workspace settings map, so the root reported here has
+// to be the very string a settings entry would be keyed by. If these ever drift,
+// every member silently reads as editable.
+func TestWorkspaceMemberRootsMatchConfiguredPaths(t *testing.T) {
+	base := t.TempDir()
+	alpha := filepath.Join(base, "alpha")
+	beta := filepath.Join(base, "beta")
+	root := filepath.Join(base, "composite")
+	for _, dir := range []string{alpha, beta, root} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	writeNote(t, alpha, "a.md", "---\ntype: term\n---\n\n# A\n")
+	writeNote(t, beta, "b.md", "---\ntype: term\n---\n\n# B\n")
+	if err := workspace.WriteCompositeConfig(root, []string{alpha, beta}); err != nil {
+		t.Fatal(err)
+	}
+	service := testService(t, nil)
+	ctx := context.Background()
+	if _, err := service.OpenWorkspace(ctx, root); err != nil {
+		t.Fatal(err)
+	}
+	members, err := service.WorkspaceMembers(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(members) != 2 {
+		t.Fatalf("expected 2 members, got %#v", members)
+	}
+	if members[0].Root != alpha || members[1].Root != beta {
+		t.Fatalf("member roots do not match the configured paths: %#v (want %q, %q)", members, alpha, beta)
+	}
+}

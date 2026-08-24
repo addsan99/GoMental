@@ -77,7 +77,7 @@ import {
   onEvent,
 } from './transport';
 import type {application} from '../wailsjs/go/models';
-import type {AppInfoWithMode, GoMentalComposite, GoMentalSettings, GoMentalWorkspaceMember, GoMentalWorkspaceSettings, LinkSuggestion, NoteDTOWithVersion, NoteType} from './transport/types';
+import type {AppInfoWithMode, GoMentalComposite, GoMentalSettings, GoMentalUIState, GoMentalWorkspaceMember, GoMentalWorkspaceSettings, LinkSuggestion, NoteDTOWithVersion, NoteType} from './transport/types';
 import {CSS_VARIABLE_NAMES, cssVariablesForTheme, loadVSCodeTheme} from './themes/vscode';
 import {themeOption, vscodeThemeOptions} from './themes/catalog';
 
@@ -312,6 +312,10 @@ function App() {
   // without clearing the list.
   const searchedTextRef = useRef('');
   const noteRequestRef = useRef(0);
+  // Last state written to disk. SaveUIState replaces the whole document, so
+  // every writer has to send the fields it isn't changing; keeping the last
+  // known value here means a caller can patch one key without dropping the rest.
+  const uiStateRef = useRef<GoMentalUIState>({});
   const backlinksRequestRef = useRef(0);
   const workspaceEpochRef = useRef(0);
   const selectedIDRef = useRef('');
@@ -489,6 +493,15 @@ function App() {
     return {items, nextID};
   }, []);
 
+  // Merge a patch into the persisted UI state. SaveUIState replaces the whole
+  // document, so writing a patch directly would drop every key the caller did
+  // not happen to mention.
+  const persistUIState = useCallback((patch: GoMentalUIState) => {
+    const next = {...uiStateRef.current, ...patch};
+    uiStateRef.current = next;
+    return SaveUIState(next);
+  }, []);
+
   const openWorkspace = useCallback(async (path: string, preferredNote = '') => {
     if (!path || busy || projectionActive) {
       return;
@@ -522,7 +535,7 @@ function App() {
       // Recent-list refresh and UI-state persistence are not needed for the
       // list to be usable; run them without blocking readiness.
       void loadRecent().catch(() => {});
-      void SaveUIState({lastWorkspace: opened.root, lastNote: nextID, theme}).catch(() => {});
+      void persistUIState({lastWorkspace: opened.root, lastNote: nextID, theme}).catch(() => {});
     } catch (err) {
       setError(errorMessage(err));
     } finally {
@@ -564,29 +577,65 @@ function App() {
 
   useEffect(() => {
     let cancelled = false;
+    // Clear first: the previous workspace's choice must not leak into this one
+    // even when both happen to have a member of the same name.
+    setNewNoteMember('');
     if (!workspace) {
       setWorkspaceMembers([]);
-      setNewNoteMember('');
       return;
     }
     void WorkspaceMembers()
       .then((members) => {
-        if (cancelled) {
-          return;
+        if (!cancelled) {
+          setWorkspaceMembers(members || []);
         }
-        setWorkspaceMembers(members || []);
-        setNewNoteMember((current) => (members || []).some((member) => member.prefix === current)
-          ? current
-          : (members || [])[0]?.prefix || '');
       })
       .catch(() => {
         if (!cancelled) {
           setWorkspaceMembers([]);
-          setNewNoteMember('');
         }
       });
     return () => { cancelled = true; };
   }, [workspace?.root]);
+
+  // A read-only member cannot take a new note, so offering it as a destination
+  // would only produce a failure at save time. Derived from settings rather than
+  // captured once, so flipping a member's access mode updates the picker.
+  const writableWorkspaceMembers = useMemo(
+    () => workspaceMembers.filter((member) => !workspaceIsReadOnly(settings, member.root)),
+    [settings, workspaceMembers],
+  );
+
+  // Restore the last destination the user picked for this workspace, falling
+  // back to the first writable member. Also runs when a member stops being
+  // writable, which retires the now-invalid selection.
+  useEffect(() => {
+    const root = workspace?.root;
+    if (!root) {
+      return;
+    }
+    setNewNoteMember((current) => {
+      if (writableWorkspaceMembers.some((member) => member.prefix === current)) {
+        return current;
+      }
+      const remembered = uiStateRef.current.lastNoteMember?.[root] || '';
+      if (writableWorkspaceMembers.some((member) => member.prefix === remembered)) {
+        return remembered;
+      }
+      return writableWorkspaceMembers[0]?.prefix || '';
+    });
+  }, [workspace?.root, writableWorkspaceMembers]);
+
+  const chooseNoteMember = useCallback((prefix: string) => {
+    setNewNoteMember(prefix);
+    const root = workspace?.root;
+    if (!root) {
+      return;
+    }
+    void persistUIState({
+      lastNoteMember: {...(uiStateRef.current.lastNoteMember || {}), [root]: prefix},
+    }).catch(() => {});
+  }, [persistUIState, workspace?.root]);
 
   const createNote = useCallback(async () => {
     if (!workspace || busy || info.readOnly || workspaceIsReadOnly(settings, workspace.root)) {
@@ -600,7 +649,11 @@ function App() {
     }
     // On a composite the note lands inside a member, so the collision check has
     // to be against the id the note will actually have, not the bare one typed.
-    const member = workspaceMembers.some((entry) => entry.prefix === newNoteMember) ? newNoteMember : '';
+    const member = writableWorkspaceMembers.some((entry) => entry.prefix === newNoteMember) ? newNoteMember : '';
+    if (!member && workspaceMembers.length > 0) {
+      setError('Every workspace in this composite is read-only. Make one editable in Settings to add notes.');
+      return;
+    }
     const qualifiedID = member ? `${member}/${id}` : id;
     if (notes.some((note) => note.id.toLocaleLowerCase() === qualifiedID.toLocaleLowerCase())) {
       setError(`A note already exists at ${qualifiedID}.`);
@@ -631,14 +684,14 @@ function App() {
       setActiveTab('note');
       await loadNotes(saved.id);
       setSelectedID(saved.id);
-      await SaveUIState({lastWorkspace: workspace.root, lastNote: saved.id, theme});
+      await persistUIState({lastWorkspace: workspace.root, lastNote: saved.id, theme});
       showToast('New note created');
     } catch (err) {
       setError(errorMessage(err));
     } finally {
       setBusy('');
     }
-  }, [busy, info.readOnly, loadNotes, newNoteID, newNoteMember, newNoteTemplate, newNoteTitle, noteTypes, notes, settings, showToast, theme, workspace, workspaceMembers]);
+  }, [busy, info.readOnly, loadNotes, newNoteID, newNoteMember, newNoteTemplate, newNoteTitle, noteTypes, notes, persistUIState, settings, showToast, theme, workspace, workspaceMembers, writableWorkspaceMembers]);
 
   const importFromURL = useCallback(async () => {
     if (!workspace || busy || info.readOnly || workspaceIsReadOnly(settings, workspace.root)) {
@@ -649,10 +702,14 @@ function App() {
       setError('Enter a URL to import.');
       return;
     }
+    const member = writableWorkspaceMembers.some((entry) => entry.prefix === newNoteMember) ? newNoteMember : '';
+    if (!member && workspaceMembers.length > 0) {
+      setError('Every workspace in this composite is read-only. Make one editable in Settings to import notes.');
+      return;
+    }
     setBusy('Importing URL');
     setError('');
     try {
-      const member = workspaceMembers.some((entry) => entry.prefix === newNoteMember) ? newNoteMember : '';
       const saved = await ImportURL({url, member});
       setImportOpen(false);
       setImportURL('');
@@ -666,14 +723,14 @@ function App() {
       await loadNotes(saved.id);
       setSelectedID(saved.id);
       setActiveTab('note');
-      await SaveUIState({lastWorkspace: workspace.root, lastNote: saved.id, theme});
+      await persistUIState({lastWorkspace: workspace.root, lastNote: saved.id, theme});
       showToast('Note imported');
     } catch (err) {
       setError(errorMessage(err));
     } finally {
       setBusy('');
     }
-  }, [busy, importURL, info.readOnly, loadNotes, newNoteMember, settings, showToast, theme, workspace, workspaceMembers]);
+  }, [busy, importURL, info.readOnly, loadNotes, newNoteMember, persistUIState, settings, showToast, theme, workspace, workspaceMembers, writableWorkspaceMembers]);
 
   useEffect(() => {
     const offProgress = onEvent('index:progress', (payload: RebuildProgress) => {
@@ -809,6 +866,7 @@ function App() {
         const appInfo = (await Info()) as AppInfoWithMode;
         setInfo(appInfo);
         const [state, loadedSettings] = await Promise.all([LoadUIState(), LoadSettings()]);
+        uiStateRef.current = state || {};
         const appSettings = normalizeSettings(loadedSettings);
         applySettingsToUI(appSettings);
         const lastNote = typeof state.lastNote === 'string' ? state.lastNote : '';
@@ -904,7 +962,7 @@ function App() {
           setRawMode(defaultEditModeRef.current === 'source');
         }
         if (workspace?.root) {
-          await SaveUIState({lastWorkspace: workspace.root, lastNote: noteID, theme});
+          await persistUIState({lastWorkspace: workspace.root, lastNote: noteID, theme});
         }
       } catch (err) {
         if (noteRequestRef.current === requestID) {
@@ -1767,7 +1825,7 @@ function App() {
     const nextTheme = themeAppearance(theme) === 'dark' ? 'light' : 'dark';
     persistSettings({...settings, appearance: {...settings.appearance, theme: nextTheme}});
     if (workspace?.root) {
-      void SaveUIState({lastWorkspace: workspace.root, lastNote: selectedID, theme: nextTheme}).catch((err) => setError(errorMessage(err)));
+      void persistUIState({lastWorkspace: workspace.root, lastNote: selectedID, theme: nextTheme}).catch((err) => setError(errorMessage(err)));
     }
   }, [persistSettings, selectedID, settings, theme, workspace?.root]);
 
@@ -2082,11 +2140,11 @@ function App() {
                   <span>Note ID</span>
                   <input value={newNoteID} onChange={(event) => setNewNoteID(event.target.value)} placeholder="folder/note-name" />
                 </label>
-                {workspaceMembers.length > 0 && (
+                {writableWorkspaceMembers.length > 0 && (
                   <label>
                     <span>Workspace</span>
-                    <select value={newNoteMember} onChange={(event) => setNewNoteMember(event.target.value)}>
-                      {workspaceMembers.map((member) => (
+                    <select value={newNoteMember} onChange={(event) => chooseNoteMember(event.target.value)}>
+                      {writableWorkspaceMembers.map((member) => (
                         <option key={member.prefix} value={member.prefix} title={member.root}>{member.name}</option>
                       ))}
                     </select>
@@ -2104,11 +2162,11 @@ function App() {
                   <span>URL</span>
                   <input value={importURL} onChange={(event) => setImportURL(event.target.value)} placeholder="https://example.com/recipe" autoFocus />
                 </label>
-                {workspaceMembers.length > 0 && (
+                {writableWorkspaceMembers.length > 0 && (
                   <label>
                     <span>Workspace</span>
-                    <select value={newNoteMember} onChange={(event) => setNewNoteMember(event.target.value)}>
-                      {workspaceMembers.map((member) => (
+                    <select value={newNoteMember} onChange={(event) => chooseNoteMember(event.target.value)}>
+                      {writableWorkspaceMembers.map((member) => (
                         <option key={member.prefix} value={member.prefix} title={member.root}>{member.name}</option>
                       ))}
                     </select>
@@ -2706,6 +2764,7 @@ function App() {
         settings={settings}
         recent={recent}
         currentWorkspace={workspace?.root || ''}
+        workspaceMembers={workspaceMembers}
         noteTypes={noteTypes}
         activeSection={settingsSection}
         saveState={settingsSaveState}
@@ -2833,6 +2892,7 @@ function SettingsModal({
   settings,
   recent,
   currentWorkspace,
+  workspaceMembers,
   noteTypes,
   activeSection,
   saveState,
@@ -2849,6 +2909,7 @@ function SettingsModal({
   settings: GoMentalSettings;
   recent: application.RecentWorkspaceDTO[];
   currentWorkspace: string;
+  workspaceMembers: GoMentalWorkspaceMember[];
   noteTypes: NoteType[];
   activeSection: SettingsSection;
   saveState: 'idle' | 'saving' | 'saved' | 'error';
@@ -2862,8 +2923,8 @@ function SettingsModal({
   onImportCollection: (content: string) => Promise<void>;
 }) {
   const workspacePaths = useMemo(
-    () => knownWorkspacePaths(settings, recent, currentWorkspace),
-    [currentWorkspace, recent, settings],
+    () => knownWorkspacePaths(settings, recent, currentWorkspace, workspaceMembers),
+    [currentWorkspace, recent, settings, workspaceMembers],
   );
   const [selectedWorkspacePath, setSelectedWorkspacePath] = useState('');
   const [typeDraft, setTypeDraft] = useState<NoteType | null>(null);
@@ -4019,7 +4080,11 @@ function normalizeSettings(value: GoMentalSettings): GoMentalSettings {
   };
 }
 
-function knownWorkspacePaths(settings: GoMentalSettings, recent: application.RecentWorkspaceDTO[], currentWorkspace: string): string[] {
+// Members of the open composite are listed too. They are workspaces in their
+// own right — each has its own access mode — but a member that was only ever
+// reached through the composite never lands in `recent`, so without this the
+// settings that decide whether it can take a new note would be unreachable.
+function knownWorkspacePaths(settings: GoMentalSettings, recent: application.RecentWorkspaceDTO[], currentWorkspace: string, members: GoMentalWorkspaceMember[] = []): string[] {
   const paths: string[] = [];
   const add = (path: string) => {
     const trimmed = path.trim();
@@ -4028,6 +4093,7 @@ function knownWorkspacePaths(settings: GoMentalSettings, recent: application.Rec
     }
   };
   add(currentWorkspace);
+  members.forEach((member) => add(member.root || ''));
   recent.forEach((item) => add(item.path || ''));
   Object.keys(settings.workspaces || {}).forEach(add);
   return paths;

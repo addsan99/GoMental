@@ -177,3 +177,14 @@ export interface GoMentalComposite {
   configured: boolean
   members: GoMentalCompositeMember[]
 }
+
+// Persisted UI state. Free-form on the Go side (map[string]any), so this is the
+// shape the app agrees to write rather than one the backend enforces.
+export interface GoMentalUIState {
+  lastWorkspace?: string
+  lastNote?: string
+  theme?: string
+  // Last destination member chosen for a new note, keyed by composite root. Per
+  // workspace because member prefixes only mean anything inside one composite.
+  lastNoteMember?: Record<string, string>
+}

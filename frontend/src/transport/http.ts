@@ -1,17 +1,12 @@
 // HTTP transport: fetch-based implementation of the binding surface for browser (server) mode.
 import type {application, main} from '../../wailsjs/go/models'
-import type {GitPRResult, GitSyncResult, GoMentalComposite, GoMentalSettings, GoMentalWorkspaceMember, ImportURLRequestWithMember, MoveNoteRequest, NoteDTOWithVersion, NoteType, SaveNoteRequestWithVersion, SetNoteFavoriteRequest, SuggestLinksRequest, SuggestLinksResponse} from './types'
+import type {GitPRResult, GitSyncResult, GoMentalComposite, GoMentalSettings, GoMentalUIState, GoMentalWorkspaceMember, ImportURLRequestWithMember, MoveNoteRequest, NoteDTOWithVersion, NoteType, SaveNoteRequestWithVersion, SetNoteFavoriteRequest, SuggestLinksRequest, SuggestLinksResponse} from './types'
 import {subscribe} from './events'
 
 // The generated App.d.ts references application.UIState, which is not defined in
 // models.ts. Mirror the loose shape App.tsx reads/writes so the signatures match
 // the binding surface without depending on the missing type.
-type UIState = {
-  lastWorkspace?: string
-  lastNote?: string
-  leftPanelWidth?: number
-  theme?: string
-}
+type UIState = GoMentalUIState
 
 class TransportError extends Error {
   code?: string
