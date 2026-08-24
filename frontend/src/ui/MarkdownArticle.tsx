@@ -183,7 +183,16 @@ export function parseArticle(rawContent: string, fallbackTitle: string): Article
     }
 
     // Paragraph (gather consecutive non-empty, non-structural lines).
-    const buf: string[] = [];
+    //
+    // The first line is taken unconditionally. Every branch above `continue`s
+    // without moving `i`, so if this gather started with the isStructural test
+    // it would collect nothing for a line that isStructural claims but no
+    // branch consumed — a table row with no delimiter row under it, say — and
+    // the outer loop would spin on that line forever. Consuming one line here
+    // makes progress a property of the loop rather than of isStructural and
+    // the branches above agreeing with each other.
+    const buf: string[] = [trimmed];
+    i += 1;
     while (i < lines.length && lines[i].trim() && !isStructural(lines[i].trim())) {
       buf.push(lines[i].trim());
       i += 1;
