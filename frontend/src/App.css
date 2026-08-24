@@ -554,30 +554,58 @@ body.gm-resizing * { cursor: col-resize !important; }
 .gm-status-text { font: 400 12px/1 var(--font-ui); color: var(--text-2); }
 
 /* ---- Tree ---- */
-.gm-tree { display: flex; flex-direction: column; min-height: 100%; }
+.gm-tree {
+  display: flex;
+  flex-direction: column;
+  min-height: 100%;
+  /* One indent step. Guide rails are drawn on this same rhythm, so the two
+     cannot drift apart. */
+  --tree-indent: 13px;
+  --tree-pad: 6px;
+  --tree-guide: var(--border-strong);
+}
 .gm-tree.drop-root { outline: 1px dashed var(--accent-soft-line); outline-offset: -3px; border-radius: 10px; }
-.gm-tree-group { display: flex; flex-direction: column; }
 
-.gm-tree-folder,
-.gm-tree-file {
+.gm-tree-row {
+  position: relative;
   display: flex;
   align-items: center;
-  gap: 8px;
-  height: 33px;
+  gap: 5px;
+  height: 24px;
   width: 100%;
+  flex: none;
   border: none;
-  border-radius: 9px;
+  border-radius: 5px;
   background: transparent;
   color: var(--text-2);
   cursor: pointer;
   text-align: left;
-  font: 500 13.5px/1 var(--font-ui);
+  font: 500 12.5px/1 var(--font-ui);
   transition: background .12s;
+  padding: 0 var(--tree-pad) 0 calc(var(--tree-pad) + var(--tree-depth, 0) * var(--tree-indent));
 }
-.gm-tree-folder { padding: 0 9px 0 calc(9px + var(--tree-depth, 0) * 15px); }
-.gm-tree-file { padding: 0 9px 0 calc(9px + var(--tree-depth, 0) * 15px); }
-.gm-tree-folder:hover,
-.gm-tree-file:hover { background: var(--surface-2); }
+/* Indent guides: one hairline at the start of every level the row sits under,
+   which is what makes the nesting readable without spending vertical space. */
+.gm-tree-row::before {
+  content: '';
+  position: absolute;
+  left: calc(var(--tree-pad) + 5px);
+  top: 0;
+  bottom: 0;
+  width: calc(var(--tree-depth, 0) * var(--tree-indent));
+  background-image: repeating-linear-gradient(
+    to right,
+    var(--tree-guide) 0 1px,
+    transparent 1px var(--tree-indent)
+  );
+  pointer-events: none;
+}
+.gm-tree-row:hover { background: var(--surface-2); }
+.gm-tree-row:focus-visible {
+  outline: none;
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+
 .gm-tree-folder.drop-target {
   background: var(--accent-soft);
   color: var(--accent-text);
@@ -593,19 +621,24 @@ body.gm-resizing * { cursor: col-resize !important; }
 }
 .gm-tree-file.active .gm-tree-file-icon { color: var(--accent-text); }
 
-.gm-tree-file-icon { color: var(--text-3); }
-.gm-tree-folder-label,
-.gm-tree-file-label { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.gm-tree-count { font: 500 10.5px/1 var(--font-mono); color: var(--text-3); flex: none; }
+.gm-tree-folder-icon { color: var(--text-3); flex: none; }
+.gm-tree-file-icon { color: var(--text-3); flex: none; }
+.gm-tree-label { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.gm-tree-count {
+  font: 500 10px/1 var(--font-mono);
+  color: var(--text-3);
+  flex: none;
+  opacity: .7;
+}
 .gm-star {
   flex: none;
-  width: 24px;
-  height: 24px;
+  width: 18px;
+  height: 18px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   margin-left: auto;
-  border-radius: 7px;
+  border-radius: 5px;
   color: var(--text-3);
   opacity: .62;
   cursor: pointer;
@@ -628,8 +661,19 @@ body.gm-resizing * { cursor: col-resize !important; }
 }
 [data-theme="dark"] .gm-star-active { color: #f2bf4c; }
 
-.gm-chevron { display: flex; color: var(--text-3); transition: transform .15s; }
+.gm-chevron {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 11px;
+  color: var(--text-3);
+  transition: transform .15s;
+}
 .gm-chevron.open { transform: rotate(90deg); }
+/* Files have no twisty, but still need the space so their labels line up with
+   the folder labels at the same level. */
+.gm-chevron-leaf { visibility: hidden; }
 
 /* ---- Search results (sidebar) ---- */
 .gm-results { display: flex; flex-direction: column; gap: 2px; }

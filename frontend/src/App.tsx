@@ -121,9 +121,11 @@ function readingFontFamily(font: GoMentalSettings['appearance']['readingFont']):
   }
 }
 
+// Notes bucketed by their immediate folder. SidebarNoteTree turns these flat
+// buckets into the actual hierarchy, including folders that hold no note
+// directly, so nesting and ordering are deliberately not decided here.
 type TreeGroup = {
   name: string;
-  depth: number;
   notes: application.NoteSummaryDTO[];
 };
 
@@ -3876,21 +3878,10 @@ function groupNotes(notes: application.NoteSummaryDTO[]): TreeGroup[] {
     items.push(note);
     groups.set(group, items);
   }
-  return Array.from(groups.entries())
-    .sort(([left], [right]) => {
-      if (left === 'Root') {
-        return -1;
-      }
-      if (right === 'Root') {
-        return 1;
-      }
-      return left.localeCompare(right);
-    })
-    .map(([name, items]) => ({
-      name,
-      depth: name === 'Root' ? 0 : name.split('/').length,
-      notes: items.sort((a, b) => a.id.localeCompare(b.id)),
-    }));
+  return Array.from(groups.entries()).map(([name, items]) => ({
+    name,
+    notes: items.sort((a, b) => a.id.localeCompare(b.id)),
+  }));
 }
 
 function clamp(value: number, min: number, max: number): number {
