@@ -327,6 +327,12 @@ function App() {
   const savedFlashTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const articleScrollRef = useRef<HTMLDivElement | null>(null);
   const pendingEditNoteRef = useRef('');
+  // A note the app just wrote and already holds in full. Create and import know
+  // the note's content, so handing it to the note-load effect lets that effect
+  // skip the ReadNote round trip and populate the pane in the same commit that
+  // moves selectedID. Without it the effect blanks selectedNote and re-reads
+  // from disk, flashing "Loading note" over a note we were never missing.
+  const pendingNoteRef = useRef<NoteDTOWithVersion | null>(null);
   // Mirrors settings.noteView.defaultEditMode so the note-load effect can honour
   // the preference without taking settings as a dependency (which would reload
   // the open note on every unrelated settings change).
@@ -493,6 +499,33 @@ function App() {
     selectedIDRef.current = nextID;
     setSelectedID(nextID);
     return {items, nextID};
+  }, []);
+
+  // Show a note the app just wrote, without a re-read.
+  //
+  // When the id changes this hands the note to the note-load effect, which
+  // adopts it in the same commit that moves selectedID. When the id does not
+  // change — re-importing the note already open — that effect never runs, so
+  // the note has to be applied here instead or the pane would keep showing the
+  // pre-write content.
+  const adoptNote = useCallback((note: NoteDTOWithVersion, openForEditing: boolean) => {
+    if (selectedIDRef.current === note.id) {
+      pendingNoteRef.current = null;
+      pendingEditNoteRef.current = '';
+      setSelectedNote(note);
+      setDraft(note.content);
+      setSavedContent(note.content);
+      setSaveState('saved');
+      setNoteVersion(note.version ?? '');
+      if (openForEditing) {
+        setIsEditing(true);
+        setRawMode(defaultEditModeRef.current === 'source');
+      }
+      return;
+    }
+    pendingNoteRef.current = note;
+    pendingEditNoteRef.current = openForEditing ? note.id : '';
+    setSelectedID(note.id);
   }, []);
 
   // Merge a patch into the persisted UI state. SaveUIState replaces the whole
@@ -671,21 +704,18 @@ function App() {
       }
       const content = renderNoteTypeStarterContent(noteType, title || basename(id), id);
       const saved = await SaveNote({id, content, member});
-      pendingEditNoteRef.current = saved.id;
+      // Everything the pane needs lands in one commit: the id it should show,
+      // the note behind that id, and the request to open it for editing.
+      // Setting selectedNote while selectedID still named the previous note
+      // left the pane inconsistent for the whole ListNotes round trip below,
+      // which rendered "Loading note" against the *old* note's path.
+      adoptNote(saved, true);
       setNewNoteOpen(false);
       setNewNoteTemplate(noteType.id);
       setNewNoteTitle('');
       setNewNoteID('');
-      setSelectedNote(saved);
-      setDraft(saved.content);
-      setSavedContent(saved.content);
-      setSaveState('saved');
-      setNoteVersion(saved.version ?? '');
-      setIsEditing(true);
-      setRawMode(settings.noteView.defaultEditMode === 'source');
       setActiveTab('note');
       await loadNotes(saved.id);
-      setSelectedID(saved.id);
       await persistUIState({lastWorkspace: workspace.root, lastNote: saved.id, theme});
       showToast('New note created');
     } catch (err) {
@@ -693,7 +723,7 @@ function App() {
     } finally {
       setBusy('');
     }
-  }, [busy, info.readOnly, loadNotes, newNoteID, newNoteMember, newNoteTemplate, newNoteTitle, noteTypes, notes, persistUIState, settings, showToast, theme, workspace, workspaceMembers, writableWorkspaceMembers]);
+  }, [adoptNote, busy, info.readOnly, loadNotes, newNoteID, newNoteMember, newNoteTemplate, newNoteTitle, noteTypes, notes, persistUIState, settings, showToast, theme, workspace, workspaceMembers, writableWorkspaceMembers]);
 
   const importFromURL = useCallback(async () => {
     if (!workspace || busy || info.readOnly || workspaceIsReadOnly(settings, workspace.root)) {
@@ -715,16 +745,11 @@ function App() {
       const saved = await ImportURL({url, member});
       setImportOpen(false);
       setImportURL('');
-      setSelectedNote(saved);
-      setDraft(saved.content);
-      setSavedContent(saved.content);
-      setSaveState('saved');
-      setNoteVersion((saved as NoteDTOWithVersion).version ?? '');
-      setIsEditing(false);
-      setRawMode(false);
-      await loadNotes(saved.id);
-      setSelectedID(saved.id);
+      // Same one-commit handoff as createNote, minus the edit request: an
+      // imported note opens in the reading view.
+      adoptNote(saved as NoteDTOWithVersion, false);
       setActiveTab('note');
+      await loadNotes(saved.id);
       await persistUIState({lastWorkspace: workspace.root, lastNote: saved.id, theme});
       showToast('Note imported');
     } catch (err) {
@@ -732,7 +757,7 @@ function App() {
     } finally {
       setBusy('');
     }
-  }, [busy, importURL, info.readOnly, loadNotes, newNoteMember, persistUIState, settings, showToast, theme, workspace, workspaceMembers, writableWorkspaceMembers]);
+  }, [adoptNote, busy, importURL, info.readOnly, loadNotes, newNoteMember, persistUIState, settings, showToast, theme, workspace, workspaceMembers, writableWorkspaceMembers]);
 
   useEffect(() => {
     const offProgress = onEvent('index:progress', (payload: RebuildProgress) => {
@@ -920,17 +945,23 @@ function App() {
     noteRequestRef.current = requestID;
     backlinksRequestRef.current += 1;
     selectedIDRef.current = selectedID;
-    setSelectedNote(null);
-    setDraft('');
-    setSavedContent('');
-    setSaveState('idle');
+    // A note the caller already has in hand, so this render can show it instead
+    // of a "Loading note" placeholder for a note that is not actually missing.
+    const preset = pendingNoteRef.current && pendingNoteRef.current.id === selectedID
+      ? pendingNoteRef.current
+      : null;
+    pendingNoteRef.current = null;
+    setSelectedNote(preset);
+    setDraft(preset ? preset.content : '');
+    setSavedContent(preset ? preset.content : '');
+    setSaveState(preset ? 'saved' : 'idle');
     // Both must be non-empty: with no note selected pendingEditNoteRef and
     // selectedID are both '', which would otherwise open the editor on nothing.
     const shouldOpenEdit = Boolean(selectedID) && pendingEditNoteRef.current === selectedID;
     setIsEditing(shouldOpenEdit);
     setRawMode(shouldOpenEdit && defaultEditModeRef.current === 'source');
     setBacklinks([]);
-    setNoteVersion('');
+    setNoteVersion(preset?.version ?? '');
     setConflictOpen(false);
     setDeletedNotice('');
     setActiveAnchor('');
@@ -946,15 +977,26 @@ function App() {
       setError('');
       try {
         const noteID = selectedID;
-        const [note, links] = await Promise.all([ReadNote(noteID), fetchCurrentBacklinks(noteID)]);
-        if (noteRequestRef.current !== requestID || note.id !== noteID) {
+        // With a preset the content is already on screen; re-reading it would
+        // only risk clobbering keystrokes the user made while the backlink
+        // request was still in flight.
+        const [note, links] = await Promise.all([
+          preset ? null : ReadNote(noteID),
+          fetchCurrentBacklinks(noteID),
+        ]);
+        if (noteRequestRef.current !== requestID) {
           return;
         }
-        setSelectedNote(note);
-        setDraft(note.content);
-        setSavedContent(note.content);
-        setSaveState('saved');
-        setNoteVersion(note.version ?? '');
+        if (note) {
+          if (note.id !== noteID) {
+            return;
+          }
+          setSelectedNote(note);
+          setDraft(note.content);
+          setSavedContent(note.content);
+          setSaveState('saved');
+          setNoteVersion(note.version ?? '');
+        }
         if (links !== null) {
           setBacklinks(links);
         }
