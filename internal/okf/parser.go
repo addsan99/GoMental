@@ -214,6 +214,12 @@ func parseTags(value any) []domain.Tag {
 	return tags
 }
 
+// NormalizeTag is the canonical tag form used everywhere tags are compared or
+// written: trimmed, unprefixed, lowercase, spaces folded to hyphens.
+func NormalizeTag(raw string) string {
+	return normalizeTag(raw)
+}
+
 func normalizeTag(raw string) string {
 	tag := strings.TrimSpace(raw)
 	tag = strings.TrimPrefix(tag, "#")

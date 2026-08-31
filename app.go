@@ -334,6 +334,22 @@ func (a *App) SelectWorkspaceDirectory() (string, error) {
 	}
 	return wailsruntime.OpenDirectoryDialog(a.context(), wailsruntime.OpenDialogOptions{Title: "Open OKF Workspace"})
 }
+// SelectImportFile picks a local text file for the import field. The filter is a
+// hint only — the service re-validates extension and content, since the dialog
+// can be bypassed by typing a path.
+func (a *App) SelectImportFile() (string, error) {
+	if !a.mustHost().Environment().NativeDialogs {
+		return "", errors.New("native file picker is not available in server mode")
+	}
+	return wailsruntime.OpenFileDialog(a.context(), wailsruntime.OpenDialogOptions{
+		Title: "Import Text File",
+		Filters: []wailsruntime.FileFilter{
+			{DisplayName: "Text notes (*.md;*.markdown;*.txt;*.rst;*.org;*.adoc)", Pattern: "*.md;*.markdown;*.mdown;*.mkd;*.mdx;*.txt;*.text;*.rst;*.org;*.adoc;*.asciidoc"},
+			{DisplayName: "All files (*.*)", Pattern: "*.*"},
+		},
+	})
+}
+
 func (a *App) OpenWorkspace(root string) (application.WorkspaceDTO, error) {
 	displayRoot := root
 	if a.viewer != nil {

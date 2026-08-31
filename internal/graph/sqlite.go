@@ -904,6 +904,32 @@ func (s *SQLiteStore) ListNotes(ctx context.Context, opts ListNotesOptions) (Lis
 	return ListNotesResult{Items: items, Total: total}, nil
 }
 
+// TagVocabulary returns how many notes carry each tag, restricted to notes that
+// still exist on disk (path != ''). This is the corpus statistic auto-tagging
+// scores against: it is both the set of tags the workspace actually uses — the
+// only tags worth proposing, since inventing new ones fragments the namespace —
+// and the frequency that tells a distinctive tag apart from a boilerplate one.
+func (s *SQLiteStore) TagVocabulary(ctx context.Context) (map[string]int, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT t.tag, COUNT(DISTINCT t.note_id) FROM note_tags t
+JOIN notes n ON n.id = t.note_id
+WHERE n.path != '' AND t.tag != ''
+GROUP BY t.tag`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	vocab := map[string]int{}
+	for rows.Next() {
+		var tag string
+		var count int
+		if err := rows.Scan(&tag, &count); err != nil {
+			return nil, err
+		}
+		vocab[tag] = count
+	}
+	return vocab, rows.Err()
+}
+
 // attachTags loads tags for the page's notes in one query and assigns them by id.
 func (s *SQLiteStore) attachTags(ctx context.Context, items []NoteRow, index map[string]int) error {
 	if len(items) == 0 {

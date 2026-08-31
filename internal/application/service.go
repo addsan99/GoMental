@@ -358,7 +358,23 @@ type WorkspaceSettings struct {
 	GitUsername    string                 `json:"gitUsername,omitempty"`
 	GitToken       string                 `json:"gitToken,omitempty"`
 	GitExitAction  string                 `json:"gitExitAction,omitempty"`
+	// AutoTag is "on" or "off". It is a string rather than a bool because the
+	// feature defaults to ON: a bool would zero-value to false and silently
+	// disable auto-tagging for every workspace whose settings predate this field.
+	AutoTag        string                 `json:"autoTag,omitempty"`
 	SuggestedLinks SuggestedLinksSettings `json:"suggestedLinks"`
+}
+
+const (
+	autoTagOn  = "on"
+	autoTagOff = "off"
+)
+
+func normalizeAutoTag(value string) string {
+	if strings.TrimSpace(value) == autoTagOff {
+		return autoTagOff
+	}
+	return autoTagOn
 }
 
 type SuggestedLinksSettings struct {
@@ -660,7 +676,7 @@ func (s *Service) SaveNote(ctx context.Context, req SaveNoteRequest) (NoteDTO, e
 	if err != nil {
 		return NoteDTO{}, err
 	}
-	note := domain.Note{ID: noteID, Document: domain.OKFDocument{Raw: req.Content}}
+	note := domain.Note{ID: noteID, Document: domain.OKFDocument{Raw: s.applyAutoTags(ctx, ws, noteID, req.Content)}}
 
 	if req.BaseVersion != "" && !req.Force {
 		expected, verr := decodeVersion(req.BaseVersion)
@@ -795,7 +811,7 @@ func (s *Service) CreateNote(ctx context.Context, req CreateNoteRequest) (NoteDT
 			return NoteDTO{}, AppError{Code: ErrNoteExists, Message: "Note already exists", Detail: string(noteID)}
 		}
 	}
-	note := domain.Note{ID: noteID, Document: domain.OKFDocument{Raw: req.Content}}
+	note := domain.Note{ID: noteID, Document: domain.OKFDocument{Raw: s.prepareNewNoteContent(ctx, ws, noteID, req.Content)}}
 	if err := repo.Save(ctx, note); err != nil {
 		return NoteDTO{}, appErr("notes.save_failed", "Could not save note", err)
 	}
@@ -813,6 +829,11 @@ func (s *Service) CreateNote(ctx context.Context, req CreateNoteRequest) (NoteDT
 }
 
 func (s *Service) ImportURL(ctx context.Context, req ImportURLRequest) (NoteDTO, error) {
+	// The UI has one import field, so the field itself decides which importer
+	// runs: a filesystem path reads a local text file, anything else is fetched.
+	if looksLikeLocalImportPath(req.URL) {
+		return s.importLocalFile(ctx, req)
+	}
 	ws, err := s.workspaceSnapshot()
 	if err != nil {
 		return NoteDTO{}, err
@@ -823,7 +844,7 @@ func (s *Service) ImportURL(ctx context.Context, req ImportURLRequest) (NoteDTO,
 	}
 	sourceURL, err := normalizeImportURL(req.URL)
 	if err != nil {
-		return NoteDTO{}, appErr("import.invalid_url", "Enter a valid http or https URL", err)
+		return NoteDTO{}, appErr("import.invalid_url", "Enter an http or https URL, or an absolute path to a text file", err)
 	}
 	contentType, html, err := fetchImportURL(ctx, sourceURL)
 	if err != nil {
@@ -850,6 +871,7 @@ func (s *Service) ImportURL(ctx context.Context, req ImportURLRequest) (NoteDTO,
 	if err != nil {
 		return NoteDTO{}, appErr("import.note_id_failed", "Could not choose an import note ID", err)
 	}
+	result.Document.Document.Raw = s.prepareNewNoteContent(ctx, ws, result.Document.ID, result.Document.Document.Raw)
 	if err := repo.Save(ctx, result.Document); err != nil {
 		return NoteDTO{}, appErr("import.save_failed", "Could not save imported note", err)
 	}
@@ -2264,6 +2286,7 @@ func normalizeWorkspaceSettings(settings WorkspaceSettings) WorkspaceSettings {
 		settings.GitToken = ""
 		settings.GitExitAction = ""
 	}
+	settings.AutoTag = normalizeAutoTag(settings.AutoTag)
 	settings.SuggestedLinks = normalizeSuggestedLinksSettings(settings.SuggestedLinks)
 	return settings
 }
@@ -2308,6 +2331,7 @@ func defaultWorkspaceSettings() WorkspaceSettings {
 			"meeting",
 		},
 		AccessMode:     "editable",
+		AutoTag:        autoTagOn,
 		SuggestedLinks: normalizeSuggestedLinksSettings(SuggestedLinksSettings{}),
 	}
 }
