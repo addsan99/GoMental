@@ -312,6 +312,10 @@ type RebuildResultDTO struct {
 	SearchPath    string `json:"searchPath"`
 	GraphPath     string `json:"graphPath"`
 	StatePath     string `json:"statePath"`
+	// UntaggedNotes is reported, never acted on. Rebuild only touches
+	// projections; tagging a note is a deliberate per-note act, so the backlog
+	// is surfaced here rather than silently written across the workspace.
+	UntaggedNotes int `json:"untaggedNotes"`
 }
 
 type RecentWorkspaceDTO struct {
@@ -1627,8 +1631,24 @@ func (s *Service) Rebuild(ctx context.Context) (RebuildResultDTO, error) {
 		return RebuildResultDTO{}, err
 	}
 	dto := rebuildDTO(result)
+	dto.UntaggedNotes = s.countUntaggedNotes(ctx)
 	s.emit("graph:updated", dto)
 	return dto, nil
+}
+
+// countUntaggedNotes sizes the untagged backlog for the rebuild summary. A
+// failure here is reported as zero rather than surfaced: the count is advisory,
+// and a broken projection query should not fail an otherwise good rebuild.
+func (s *Service) countUntaggedNotes(ctx context.Context) int {
+	_, _, graphStore, err := s.sessionSnapshot()
+	if err != nil || graphStore == nil {
+		return 0
+	}
+	count, err := graphStore.CountUntaggedNotes(ctx)
+	if err != nil {
+		return 0
+	}
+	return count
 }
 
 // RecentWorkspaces lists the workspaces offered in the open-workspace menu:

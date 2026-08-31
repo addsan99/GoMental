@@ -840,6 +840,18 @@ func (s *SQLiteStore) CountNotes(ctx context.Context) (int, error) {
 	return n, err
 }
 
+// CountUntaggedNotes reports how many notes carry no tags at all. Rebuild uses
+// it to surface the size of the untagged backlog without touching a single
+// note: auto-tagging is a deliberate, per-note act, so the rebuild only counts.
+func (s *SQLiteStore) CountUntaggedNotes(ctx context.Context) (int, error) {
+	var n int
+	err := s.db.QueryRowContext(ctx, `
+                SELECT COUNT(*) FROM notes
+                WHERE path != ''
+                  AND NOT EXISTS (SELECT 1 FROM note_tags t WHERE t.note_id = notes.id AND t.tag != '')`).Scan(&n)
+	return n, err
+}
+
 // ListNotes serves a sorted/filtered/paginated page of note metadata directly
 // from the notes/note_tags tables — no filesystem walk. Total is the count of
 // notes matching the filter, independent of Offset/Limit.

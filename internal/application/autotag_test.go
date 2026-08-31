@@ -339,3 +339,30 @@ func TestAutoTagRespectsWorkspaceSetting(t *testing.T) {
 		t.Fatalf("the empty tags array is not part of the toggle: %q", created.Content)
 	}
 }
+
+func TestRebuildReportsUntaggedNotesWithoutTaggingThem(t *testing.T) {
+	root := t.TempDir()
+	writeNote(t, root, "alpha.md", "---\ntype: term\ntitle: Alpha\ntags: [kubernetes]\n---\n\n# Alpha\n")
+	// Untagged, and its title matches an existing vocabulary tag: if rebuild
+	// ever auto-tagged, this note is the one that would change.
+	writeNote(t, root, "beta.md", "---\ntype: term\ntitle: Kubernetes rollout\n---\n\n# Kubernetes rollout\n")
+	service := testService(t, func(string, any) {})
+	ctx := context.Background()
+	if _, err := service.OpenWorkspace(ctx, root); err != nil {
+		t.Fatalf("open workspace: %v", err)
+	}
+	result, err := service.Rebuild(ctx)
+	if err != nil {
+		t.Fatalf("rebuild: %v", err)
+	}
+	if result.UntaggedNotes != 1 {
+		t.Fatalf("expected 1 untagged note, got %d", result.UntaggedNotes)
+	}
+	after, err := os.ReadFile(filepath.Join(root, "beta.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(after), "kubernetes") {
+		t.Fatalf("rebuild must not write tags into notes: %q", string(after))
+	}
+}

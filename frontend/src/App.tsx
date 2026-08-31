@@ -598,11 +598,17 @@ function App() {
     setError('');
     setProgress('Rebuilding 0% complete');
     try {
-      await Rebuild();
+      const result = await Rebuild();
       const {items} = await loadNotes(selectedID);
       setProgress('Rebuilding 100% complete');
       setProjectionActive(false);
-      showToast(`Index rebuilt · ${items.length} notes`);
+      // The untagged count is informational. Rebuild deliberately does not tag
+      // anything: it is the command reached for when state looks wrong, so it
+      // stays a projection rebuild rather than a bulk edit of the notes.
+      const untagged = result?.untaggedNotes ?? 0;
+      showToast(untagged > 0
+        ? `Index rebuilt · ${items.length} notes · ${untagged} untagged`
+        : `Index rebuilt · ${items.length} notes`);
     } catch (err) {
       setProjectionActive(false);
       setError(errorMessage(err));
