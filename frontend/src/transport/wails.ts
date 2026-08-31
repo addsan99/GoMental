@@ -22,6 +22,7 @@ import {
   SaveNoteAsset,
   SaveUIState,
   Search,
+  SelectImportFile,
   SelectWorkspaceDirectory,
 } from '../../wailsjs/go/main/App'
 import {EventsOn} from '../../wailsjs/runtime/runtime'
@@ -47,6 +48,7 @@ export {
   SaveNoteAsset,
   SaveUIState,
   Search,
+  SelectImportFile,
   SelectWorkspaceDirectory,
 }
 

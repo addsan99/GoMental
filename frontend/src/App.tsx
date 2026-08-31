@@ -72,6 +72,7 @@ import {
   Search,
   SuggestLinks,
   SetNoteFavorite,
+  SelectImportFile,
   SelectWorkspaceDirectory,
   WorkspaceMembers,
   onEvent,
@@ -725,13 +726,24 @@ function App() {
     }
   }, [adoptNote, busy, info.readOnly, loadNotes, newNoteID, newNoteMember, newNoteTemplate, newNoteTitle, noteTypes, notes, persistUIState, settings, showToast, theme, workspace, workspaceMembers, writableWorkspaceMembers]);
 
+  const chooseImportFile = useCallback(async () => {
+    setError('');
+    try {
+      const path = await SelectImportFile();
+      // An empty result means the picker was dismissed; keep whatever is typed.
+      if (path) setImportURL(path);
+    } catch (err) {
+      setError(errorMessage(err));
+    }
+  }, []);
+
   const importFromURL = useCallback(async () => {
     if (!workspace || busy || info.readOnly || workspaceIsReadOnly(settings, workspace.root)) {
       return;
     }
     const url = importURL.trim();
     if (!url) {
-      setError('Enter a URL to import.');
+      setError('Enter a URL or file path to import.');
       return;
     }
     const member = writableWorkspaceMembers.some((entry) => entry.prefix === newNoteMember) ? newNoteMember : '';
@@ -739,7 +751,7 @@ function App() {
       setError('Every workspace in this composite is read-only. Make one editable in Settings to import notes.');
       return;
     }
-    setBusy('Importing URL');
+    setBusy('Importing note');
     setError('');
     try {
       const saved = await ImportURL({url, member});
@@ -2203,8 +2215,11 @@ function App() {
             {workspace && importOpen && (
               <form className="gm-inline-form" onSubmit={(event) => { event.preventDefault(); void importFromURL(); }}>
                 <label>
-                  <span>URL</span>
-                  <input value={importURL} onChange={(event) => setImportURL(event.target.value)} placeholder="https://example.com/recipe" autoFocus />
+                  <span>URL or file path</span>
+                  <div className="gm-inline-field">
+                    <input value={importURL} onChange={(event) => setImportURL(event.target.value)} placeholder="https://example.com/recipe or /path/to/note.md" autoFocus />
+                    <button type="button" className="gm-btn gm-btn-ghost gm-btn-sm" onClick={() => void chooseImportFile()} disabled={interactionBusy}>Browse…</button>
+                  </div>
                 </label>
                 {writableWorkspaceMembers.length > 0 && (
                   <label>
@@ -3514,6 +3529,25 @@ function SettingsModal({
                             </>
                           )}
                         </div>
+                        <div className="gm-setting-block">
+                          <div>
+                            <strong>Automatic tags</strong>
+                            <small>When a new, imported or saved note has no tags, add confident matches drawn from tags this workspace already uses.</small>
+                          </div>
+                          <label className="gm-setting-row">
+                            <span><strong>Suggest tags</strong></span>
+                            <select
+                              value={selectedWorkspaceSettings.autoTag}
+                              onChange={(event) => updateSelectedWorkspaceSettings({
+                                ...selectedWorkspaceSettings,
+                                autoTag: event.target.value as GoMentalWorkspaceSettings['autoTag'],
+                              })}
+                            >
+                              <option value="on">On</option>
+                              <option value="off">Off</option>
+                            </select>
+                          </label>
+                        </div>
                       </>
                     ) : (
                       <div className="gm-workspace-empty gm-workspace-empty-large">Choose or browse for a workspace to configure it.</div>
@@ -4166,6 +4200,7 @@ function defaultWorkspaceSettings(): GoMentalWorkspaceSettings {
     gitUsername: '',
     gitToken: '',
     gitExitAction: 'none',
+    autoTag: 'on',
     suggestedLinks: {
       mode: 'off',
       trigger: 'onSave',
@@ -4199,6 +4234,9 @@ function normalizeWorkspaceSettings(value: GoMentalWorkspaceSettings): GoMentalW
     gitUsername: accessMode === 'writableGit' ? (value?.gitUsername || '').trim() : '',
     gitToken: accessMode === 'writableGit' ? (value?.gitToken || '').trim() : '',
     gitExitAction: accessMode === 'writableGit' ? gitExitAction : 'none',
+    // Anything other than an explicit 'off' means on: the feature defaults to
+    // enabled, so settings written before it existed must not disable it.
+    autoTag: value?.autoTag === 'off' ? 'off' : 'on',
     suggestedLinks: {
       mode: value?.suggestedLinks?.mode === 'prompt' || value?.suggestedLinks?.mode === 'automatic' ? value.suggestedLinks.mode : 'off',
       trigger: value?.suggestedLinks?.trigger === 'whileEditing' ? 'whileEditing' : 'onSave',

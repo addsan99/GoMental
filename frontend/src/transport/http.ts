@@ -244,6 +244,10 @@ export function SelectWorkspaceDirectory(): Promise<string> {
   return Promise.reject(new Error('native directory picker is not available in server mode'))
 }
 
+export function SelectImportFile(): Promise<string> {
+  return Promise.reject(new Error('native file picker is not available in server mode'))
+}
+
 export function onEvent(name: string, cb: (...data: any[]) => void): () => void {
   return subscribe(name, (payload) => cb(payload))
 }

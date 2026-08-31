@@ -540,6 +540,11 @@ body.gm-resizing * { cursor: col-resize !important; }
 .gm-inline-form input:focus,
 .gm-inline-form select:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
 .gm-inline-form-actions { display: flex; justify-content: flex-end; gap: 8px; }
+/* Pairs a text input with a trailing action button (e.g. the import Browse
+   picker) without letting the button shrink under a long path. */
+.gm-inline-field { display: flex; gap: 6px; align-items: center; }
+.gm-inline-field input { flex: 1; min-width: 0; }
+.gm-inline-field .gm-btn { flex: none; }
 
 .gm-sidebar-body { flex: 1; overflow-y: auto; padding: 0 8px 16px; min-height: 0; }
 

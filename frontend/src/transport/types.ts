@@ -118,6 +118,7 @@ export type GoMentalWorkspaceSettings = {
   gitUsername: string
   gitToken: string
   gitExitAction: 'none' | 'prompt' | 'autoPr' | 'autoMerge'
+  autoTag: 'on' | 'off'
   suggestedLinks: {
     mode: 'off' | 'prompt' | 'automatic'
     trigger: 'whileEditing' | 'onSave'
