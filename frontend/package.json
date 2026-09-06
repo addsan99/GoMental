@@ -11,6 +11,7 @@
     "android:add": "cap add android",
     "android:sync": "npm run build:mobile && cap sync android",
     "android:open": "cap open android",
+    "test": "node scripts/run-tests.mjs",
     "typecheck": "tsc --noEmit",
     "lint": "tsc --noEmit",
     "preview": "vite preview"
