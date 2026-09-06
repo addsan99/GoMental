@@ -15,7 +15,7 @@ import {MarkdownArticle, frontmatterBlock, parseArticle, slugify} from './ui/Mar
 import type {OutlineEntry} from './ui/MarkdownArticle';
 import FindBar from './ui/FindBar';
 import {basename, errorMessage} from './util';
-import {FacetFilters, facetMatchesNote, anyFacetActive, folderOf} from './ui/graph/filters';
+import {FacetFilters, facetMatchesNote, anyFacetActive, filtersHidingNote, folderOf} from './ui/graph/filters';
 import type {FacetFilter, FacetOption} from './ui/graph/filters';
 import {DEPTH_OPTIONS, depthLabel} from './ui/graph/palette';
 import {
@@ -274,6 +274,12 @@ function App() {
   // Declared here rather than beside the note-list filter below because the
   // search effect reads it too, and hook dependency arrays evaluate in order.
   const facetsActive = anyFacetActive(facets);
+  // Mirrors so revealNote can read the live filter state without being rebuilt
+  // (and re-triggering its callers) every time a facet or keystroke changes.
+  const facetsRef = useRef(facets);
+  facetsRef.current = facets;
+  const searchTextRef = useRef(searchText);
+  searchTextRef.current = searchText;
   // Browser-style visit history of note IDs. Every selection path funnels through
   // setSelectedID, so a single effect records history; back/forward/dropdown jumps
   // set suppressHistoryRef to avoid re-recording the entry they navigate to. Stack
@@ -492,15 +498,35 @@ function App() {
     }
   }, [refreshInfo, showToast]);
 
-  const loadNotes = useCallback(async (preferredID = '') => {
-    const items = await ListNotes();
+  const applyNoteList = useCallback((items: application.NoteSummaryDTO[]) => {
     setNotes(items);
     setWorkspace((current) => current ? {...current, noteCount: items.length} : current);
-    const nextID = preferredID || items[0]?.id || '';
+  }, []);
+
+  // Refresh the note list without touching the selection.
+  //
+  // Mutations emit note:updated before the originating call returns, so a
+  // refresh triggered by that event runs while the caller is still awaiting and
+  // still sees the previously selected note. Selecting anything here would let
+  // that stale id land after the caller has already moved on.
+  const refreshNotes = useCallback(async () => {
+    const items = await ListNotes();
+    applyNoteList(items);
+    return items;
+  }, [applyNoteList]);
+
+  const loadNotes = useCallback(async (preferredID = '') => {
+    const items = await ListNotes();
+    applyNoteList(items);
+    // A note adopted while this request was in flight wins. Otherwise a slower
+    // list refresh could pull the pane back to whatever was selected when it
+    // started, which drops the note the app just handed to the editor.
+    const pendingID = pendingNoteRef.current?.id || '';
+    const nextID = pendingID || preferredID || items[0]?.id || '';
     selectedIDRef.current = nextID;
     setSelectedID(nextID);
     return {items, nextID};
-  }, []);
+  }, [applyNoteList]);
 
   // Show a note the app just wrote, without a re-read.
   //
@@ -679,6 +705,22 @@ function App() {
     }).catch(() => {});
   }, [persistUIState, workspace?.root]);
 
+  // Make sure a note the app just created or imported is actually visible in the
+  // sidebar. Filters and the search box are display-only, so they never change
+  // which note is selected — but a brand new note matches neither an active tag
+  // facet nor the current query, so the list would show everything except the
+  // note the user just asked for. Clearing beats silently hiding it.
+  const revealNote = useCallback((note: application.NoteSummaryDTO | undefined) => {
+    const hiding = filtersHidingNote(searchTextRef.current, facetsRef.current, note);
+    if (hiding.search) {
+      setSearchText('');
+    }
+    if (hiding.facets) {
+      setFacets({types: [], tags: [], folders: [], favorites: false});
+    }
+    return hiding.search || hiding.facets;
+  }, []);
+
   const createNote = useCallback(async () => {
     if (!workspace || busy || info.readOnly || workspaceIsReadOnly(settings, workspace.root)) {
       return;
@@ -722,15 +764,16 @@ function App() {
       setNewNoteTitle('');
       setNewNoteID('');
       setActiveTab('note');
-      await loadNotes(saved.id);
+      const {items} = await loadNotes(saved.id);
+      const revealed = revealNote(items.find((note) => note.id === saved.id));
       await persistUIState({lastWorkspace: workspace.root, lastNote: saved.id, theme});
-      showToast('New note created');
+      showToast(revealed ? 'New note created · filters cleared' : 'New note created');
     } catch (err) {
       setError(errorMessage(err));
     } finally {
       setBusy('');
     }
-  }, [adoptNote, busy, info.readOnly, loadNotes, newNoteID, newNoteMember, newNoteTemplate, newNoteTitle, noteTypes, notes, persistUIState, settings, showToast, theme, workspace, workspaceMembers, writableWorkspaceMembers]);
+  }, [adoptNote, busy, info.readOnly, loadNotes, newNoteID, newNoteMember, newNoteTemplate, newNoteTitle, noteTypes, notes, persistUIState, revealNote, settings, showToast, theme, workspace, workspaceMembers, writableWorkspaceMembers]);
 
   const chooseImportFile = useCallback(async () => {
     setError('');
@@ -767,15 +810,16 @@ function App() {
       // imported note opens in the reading view.
       adoptNote(saved as NoteDTOWithVersion, false);
       setActiveTab('note');
-      await loadNotes(saved.id);
+      const {items} = await loadNotes(saved.id);
+      const revealed = revealNote(items.find((note) => note.id === saved.id));
       await persistUIState({lastWorkspace: workspace.root, lastNote: saved.id, theme});
-      showToast('Note imported');
+      showToast(revealed ? 'Note imported · filters cleared' : 'Note imported');
     } catch (err) {
       setError(errorMessage(err));
     } finally {
       setBusy('');
     }
-  }, [adoptNote, busy, importURL, info.readOnly, loadNotes, newNoteMember, persistUIState, settings, showToast, theme, workspace, workspaceMembers, writableWorkspaceMembers]);
+  }, [adoptNote, busy, importURL, info.readOnly, loadNotes, newNoteMember, persistUIState, revealNote, settings, showToast, theme, workspace, workspaceMembers, writableWorkspaceMembers]);
 
   useEffect(() => {
     const offProgress = onEvent('index:progress', (payload: RebuildProgress) => {
@@ -810,7 +854,9 @@ function App() {
     };
     const isDirty = draft !== savedContent;
     const offUpdated = onEvent('note:updated', (payload: NoteDTOWithVersion) => {
-      void loadNotes(selectedID);
+      // List only: this event fires while the call that caused it is still in
+      // flight, so selectedID here may already be stale.
+      void refreshNotes();
       bumpGraphRevision();
       if (payload?.id !== selectedID) {
         return;
@@ -850,10 +896,18 @@ function App() {
     });
     const offDeleted = onEvent('note:deleted', (payload: {id?: string}) => {
       bumpGraphRevision();
-      if (payload?.id && payload.id === selectedID) {
+      // selectedIDRef rather than the closed-over selectedID: this fires while
+      // the delete call is still in flight, so the closure can be a step behind.
+      const deletedSelected = Boolean(payload?.id) && payload.id === selectedIDRef.current;
+      if (deletedSelected) {
         setDeletedNotice('This note was removed on the server.');
+        // Only a deletion of the open note may move the selection. Falling back
+        // to the first note on every deletion yanked the user off whatever they
+        // were reading whenever some other note went away.
+        void loadNotes('');
+        return;
       }
-      void loadNotes('');
+      void refreshNotes();
     });
     const offGraph = onEvent('graph:updated', () => bumpGraphRevision());
     // git:synced is the human-facing "just pulled" signal. Content refresh is
@@ -899,7 +953,7 @@ function App() {
       offGitMerged();
       offGitError();
     };
-  }, [draft, fetchCurrentBacklinks, isEditing, loadNotes, noteVersion, refreshInfo, savedContent, selectedID, showToast]);
+  }, [draft, fetchCurrentBacklinks, isEditing, loadNotes, noteVersion, refreshInfo, refreshNotes, savedContent, selectedID, showToast]);
 
   useEffect(() => {
     if (initialLoadRef.current) {

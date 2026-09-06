@@ -37,3 +37,21 @@ export function facetMatchesNote(note: application.NoteSummaryDTO | undefined, f
 export function anyFacetActive(facets: FacetFilter): boolean {
   return facets.types.length > 0 || facets.tags.length > 0 || facets.folders.length > 0 || facets.favorites
 }
+
+// Which display filters would hide a note the app just created or imported.
+//
+// Filters and the search box are display-only — they never change which note is
+// selected — but a brand new note matches neither an active tag facet nor the
+// current query, so the sidebar would list everything except the note the user
+// just asked for. A search query always hides it: the index is asynchronous, so
+// even a note that would match is missing from the current hits.
+export function filtersHidingNote(
+  searchText: string,
+  facets: FacetFilter,
+  note: application.NoteSummaryDTO | undefined,
+): {search: boolean; facets: boolean} {
+  return {
+    search: searchText.trim().length > 0,
+    facets: anyFacetActive(facets) && !facetMatchesNote(note, facets),
+  }
+}
