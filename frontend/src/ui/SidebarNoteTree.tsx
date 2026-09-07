@@ -107,6 +107,7 @@ export default function SidebarNoteTree({
   selectedID,
   activeTab,
   onSelectNote,
+  onNavigateNote,
   onToggleFolder,
   onToggleFavorite,
   onMoveNote,
@@ -118,6 +119,7 @@ export default function SidebarNoteTree({
   selectedID: string;
   activeTab: string;
   onSelectNote: (id: string) => void;
+  onNavigateNote?: (id: string) => void;
   onToggleFolder: (name: string) => void;
   onToggleFavorite?: (id: string, favorite: boolean) => void;
   onMoveNote?: (id: string, folder: string) => void;
@@ -245,6 +247,20 @@ export default function SidebarNoteTree({
     setFocusKey(key);
   }, []);
 
+  // Move the keyboard cursor and, when it lands on a note, open it. Selection
+  // follows the cursor so the arrow keys browse notes rather than just shifting
+  // focus; folder rows aren't notes, so those only take the cursor.
+  const moveCursor = useCallback((key: string) => {
+    if (!key) {
+      return;
+    }
+    moveFocus(key);
+    const row = rows.find((candidate) => candidate.key === key);
+    if (row?.kind === 'file') {
+      (onNavigateNote || onSelectNote)(row.note.id);
+    }
+  }, [moveFocus, onNavigateNote, onSelectNote, rows]);
+
   const handleKeyDown = (event: KeyboardEvent, index: number) => {
     const row = rows[index];
     if (!row) {
@@ -253,19 +269,19 @@ export default function SidebarNoteTree({
     switch (event.key) {
       case 'ArrowDown':
         event.preventDefault();
-        moveFocus(rows[index + 1]?.key || row.key);
+        moveCursor(rows[index + 1]?.key || row.key);
         return;
       case 'ArrowUp':
         event.preventDefault();
-        moveFocus(rows[index - 1]?.key || row.key);
+        moveCursor(rows[index - 1]?.key || row.key);
         return;
       case 'Home':
         event.preventDefault();
-        moveFocus(rows[0]?.key || '');
+        moveCursor(rows[0]?.key || '');
         return;
       case 'End':
         event.preventDefault();
-        moveFocus(rows[rows.length - 1]?.key || '');
+        moveCursor(rows[rows.length - 1]?.key || '');
         return;
       case 'ArrowRight':
         if (row.kind !== 'folder') {
@@ -273,7 +289,7 @@ export default function SidebarNoteTree({
         }
         event.preventDefault();
         if (row.open) {
-          moveFocus(rows[index + 1]?.key || row.key);
+          moveCursor(rows[index + 1]?.key || row.key);
         } else {
           onToggleFolder(row.path);
         }
@@ -285,11 +301,11 @@ export default function SidebarNoteTree({
           return;
         }
         // Jump to the enclosing folder: the nearest row above that is a folder
-        // sitting one level shallower.
+        // sitting one level shallower. Always a folder, so no note is opened.
         for (let i = index - 1; i >= 0; i -= 1) {
           const candidate = rows[i];
           if (candidate.kind === 'folder' && candidate.depth === row.depth - 1) {
-            moveFocus(candidate.key);
+            moveCursor(candidate.key);
             return;
           }
         }
@@ -305,6 +321,15 @@ export default function SidebarNoteTree({
   // Roving tabindex: exactly one row is reachable by Tab, and the arrow keys
   // move from there. Falls back to the selected note, then the first row.
   const tabKey = (focusKey && rows.some((row) => row.key === focusKey) ? focusKey : '') || selectedKey || rows[0]?.key || '';
+
+  // WebKit doesn't focus a button when it's clicked, so on macOS the roving
+  // tabindex below is unreachable by mouse: click a note and the arrow keys
+  // still go to the document. Focus the row ourselves. Done on click rather
+  // than mousedown so it can't interfere with starting a drag, and it's a no-op
+  // for Enter/Space, where the row is already focused.
+  const focusOnClick = (event: {currentTarget: HTMLElement}) => {
+    event.currentTarget.focus();
+  };
 
   const registerRow = (key: string) => (element: HTMLElement | null) => {
     if (element) {
@@ -332,7 +357,10 @@ export default function SidebarNoteTree({
           {...shared}
           className={dropFolder === row.path ? 'gm-tree-row gm-tree-folder drop-target' : 'gm-tree-row gm-tree-folder'}
           aria-expanded={row.open}
-          onClick={() => onToggleFolder(row.path)}
+          onClick={(event) => {
+            focusOnClick(event);
+            onToggleFolder(row.path);
+          }}
           onDragOver={(event) => handleDragOver(event, row.path)}
           onDragLeave={() => setDropFolder((current) => current === row.path ? null : current)}
           onDrop={(event) => handleDrop(event, row.path)}
@@ -357,7 +385,10 @@ export default function SidebarNoteTree({
           dragNoteID === row.note.id ? 'dragging' : '',
         ].filter(Boolean).join(' ')}
         aria-selected={active}
-        onClick={() => onSelectNote(row.note.id)}
+        onClick={(event) => {
+          focusOnClick(event);
+          onSelectNote(row.note.id);
+        }}
         onContextMenu={(event) => openMenu(event, row.note.id)}
         draggable={canMove}
         onDragStart={(event) => handleDragStart(event, row.note.id)}

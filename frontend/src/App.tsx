@@ -1,5 +1,5 @@
 import {lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState} from 'react';
-import type {CSSProperties, PointerEvent as ReactPointerEvent, ReactNode} from 'react';
+import type {CSSProperties, KeyboardEvent as ReactKeyboardEvent, PointerEvent as ReactPointerEvent, ReactNode} from 'react';
 import './App.css';
 import type {MdxNoteEditorHandle} from './MdxNoteEditor';
 import type {CodeMirrorEditorHandle} from './CodeMirrorEditor';
@@ -15,6 +15,7 @@ import {MarkdownArticle, frontmatterBlock, parseArticle, slugify} from './ui/Mar
 import type {OutlineEntry} from './ui/MarkdownArticle';
 import FindBar from './ui/FindBar';
 import {basename, errorMessage} from './util';
+import {recordVisit} from './navHistory';
 import {FacetFilters, facetMatchesNote, anyFacetActive, filtersHidingNote, folderOf} from './ui/graph/filters';
 import type {FacetFilter, FacetOption} from './ui/graph/filters';
 import {DEPTH_OPTIONS, depthLabel} from './ui/graph/palette';
@@ -151,8 +152,6 @@ type SettingsSection = 'appearance' | 'noteView' | 'graphView' | 'workspaceSetti
 // the render cap in GraphView3D) stays usable well beyond this.
 const LARGE_GRAPH_3D_MAX = 1200;
 
-// How many recently-visited notes the back/forward history retains.
-const HISTORY_MAX = 15;
 const NOTE_ZOOM_MIN = 0.75;
 const NOTE_ZOOM_MAX = 2;
 const NOTE_ZOOM_STEP = 0.1;
@@ -286,6 +285,15 @@ function App() {
   // and index live in one object so the recording updater stays pure.
   const [nav, setNav] = useState<{stack: string[]; index: number}>({stack: [], index: -1});
   const suppressHistoryRef = useRef(false);
+  // Arrowing through the sidebar selects each note it lands on, which would
+  // otherwise push one history entry per keypress. 'replace' overwrites the top
+  // of the stack instead, so a run of arrow presses collapses to the note the
+  // user settles on. Consumed and reset by the recording effect.
+  const historyModeRef = useRef<'push' | 'replace'>('push');
+  // The last note reached by the keyboard cursor. A run is still going only if
+  // this is what is currently selected, so any other way of changing notes ends
+  // it without every one of those paths having to know about the run.
+  const lastKeyboardNoteRef = useRef('');
   const [historyMenuOpen, setHistoryMenuOpen] = useState(false);
   const [openWorkspaceMenuOpen, setOpenWorkspaceMenuOpen] = useState(false);
   const [settings, setSettings] = useState<GoMentalSettings>(DEFAULT_SETTINGS);
@@ -1547,6 +1555,20 @@ function App() {
   }, []);
 
   const selectNote = useCallback((id: string) => {
+    // A click ends any keyboard run, so the next arrow press starts a fresh
+    // history entry even when it lands back on the note just clicked.
+    lastKeyboardNoteRef.current = '';
+    setSelectedID(id);
+    setActiveTab('note');
+    setRawMode(false);
+  }, []);
+
+  // Selection driven by the sidebar's keyboard cursor. Same result as a click,
+  // but consecutive presses collapse into a single history entry so arrowing
+  // past ten notes doesn't cost ten presses of Back to undo.
+  const cursorToNote = useCallback((id: string) => {
+    historyModeRef.current = lastKeyboardNoteRef.current === selectedIDRef.current ? 'replace' : 'push';
+    lastKeyboardNoteRef.current = id;
     setSelectedID(id);
     setActiveTab('note');
     setRawMode(false);
@@ -1568,17 +1590,12 @@ function App() {
     }
     if (suppressHistoryRef.current) {
       suppressHistoryRef.current = false;
+      historyModeRef.current = 'push';
       return;
     }
-    setNav((prev) => {
-      if (prev.stack[prev.index] === selectedID) {
-        return prev;
-      }
-      const truncated = prev.stack.slice(0, prev.index + 1);
-      truncated.push(selectedID);
-      const trimmed = truncated.slice(-HISTORY_MAX);
-      return {stack: trimmed, index: trimmed.length - 1};
-    });
+    const mode = historyModeRef.current;
+    historyModeRef.current = 'push';
+    setNav((prev) => recordVisit(prev, selectedID, mode));
   }, [selectedID]);
 
   const jumpToHistory = useCallback((index: number) => {
@@ -2310,7 +2327,9 @@ function App() {
                 error={searchError}
                 filteredOut={filteredOutSearchCount}
                 onClearFacets={() => setFacets({types: [], tags: [], folders: [], favorites: false})}
+                selectedID={selectedID}
                 onOpen={openSearchResult}
+                onNavigate={cursorToNote}
                 onToggleFavorite={toggleNoteFavorite}
                 onNoteAction={handleNoteTreeAction}
                 actionsDisabled={readOnly || interactionBusy}
@@ -2322,6 +2341,7 @@ function App() {
                 selectedID={selectedID}
                 activeTab={activeTab}
                 onSelectNote={selectNote}
+                onNavigateNote={cursorToNote}
                 onToggleFolder={toggleFolder}
                 onToggleFavorite={toggleNoteFavorite}
                 onMoveNote={moveNoteToFolder}
@@ -3775,8 +3795,10 @@ function SearchResultsList({
   query,
   error,
   filteredOut,
+  selectedID,
   onClearFacets,
   onOpen,
+  onNavigate,
   onToggleFavorite,
   onNoteAction,
   actionsDisabled,
@@ -3786,8 +3808,10 @@ function SearchResultsList({
   query: string;
   error: string;
   filteredOut: number;
+  selectedID: string;
   onClearFacets: () => void;
   onOpen: (id: string) => void;
+  onNavigate?: (id: string) => void;
   onToggleFavorite: (id: string, favorite: boolean) => void;
   onNoteAction?: (action: NoteTreeAction, id: string) => void;
   actionsDisabled?: boolean;
@@ -3799,6 +3823,46 @@ function SearchResultsList({
     onNoteAction,
     canMutate: Boolean(onNoteAction) && !actionsDisabled,
   });
+  // A query replaces the tree with this list, so it needs the same keyboard
+  // cursor — otherwise arrowing between notes stops working the moment the user
+  // searches.
+  const rowRefs = useRef(new Map<string, HTMLElement>());
+  const [focusID, setFocusID] = useState('');
+  const move = (id: string | undefined) => {
+    if (!id) {
+      return;
+    }
+    setFocusID(id);
+    rowRefs.current.get(id)?.focus();
+    (onNavigate || onOpen)(id);
+  };
+  const onRowKeyDown = (event: ReactKeyboardEvent, index: number) => {
+    switch (event.key) {
+      case 'ArrowDown':
+        event.preventDefault();
+        move(results[index + 1]?.id || results[index]?.id);
+        return;
+      case 'ArrowUp':
+        event.preventDefault();
+        move(results[index - 1]?.id || results[index]?.id);
+        return;
+      case 'Home':
+        event.preventDefault();
+        move(results[0]?.id);
+        return;
+      case 'End':
+        event.preventDefault();
+        move(results[results.length - 1]?.id);
+        return;
+      default:
+    }
+  };
+  // Roving tabindex, matching the tree: one result is reachable by Tab and the
+  // arrows move from there.
+  const tabID = (focusID && results.some((result) => result.id === focusID) ? focusID : '')
+    || (results.some((result) => result.id === selectedID) ? selectedID : '')
+    || results[0]?.id
+    || '';
   if (status === 'searching') {
     return <div className="gm-result-label">Searching…</div>;
   }
@@ -3815,14 +3879,36 @@ function SearchResultsList({
           </button>
         )}
       </div>
-      {results.map((result) => (
-        <button type="button" className="gm-result" key={result.id} onClick={() => onOpen(result.id)} onContextMenu={(event) => openMenu(event, result.id)}>
+      {results.map((result, index) => (
+        <button
+          type="button"
+          className={result.id === selectedID ? 'gm-result active' : 'gm-result'}
+          key={result.id}
+          ref={(element) => {
+            if (element) {
+              rowRefs.current.set(result.id, element);
+            } else {
+              rowRefs.current.delete(result.id);
+            }
+          }}
+          tabIndex={result.id === tabID ? 0 : -1}
+          aria-current={result.id === selectedID ? 'true' : undefined}
+          onClick={(event) => {
+            // WebKit won't focus a clicked button, so do it here or the arrow
+            // keys never reach this list by mouse.
+            event.currentTarget.focus();
+            onOpen(result.id);
+          }}
+          onFocus={() => setFocusID(result.id)}
+          onKeyDown={(event) => onRowKeyDown(event, index)}
+          onContextMenu={(event) => openMenu(event, result.id)}
+        >
           <div className="gm-result-head">
             <span className="gm-result-title">{result.title || basename(result.id) || result.id}</span>
             <span className="gm-result-path">{result.path || result.id}</span>
             <span
               role="button"
-              tabIndex={0}
+              tabIndex={-1}
               className={result.favorite ? 'gm-star gm-star-active' : 'gm-star'}
               title={result.favorite ? 'Remove from favorites' : 'Add to favorites'}
               aria-label={result.favorite ? 'Remove from favorites' : 'Add to favorites'}
