@@ -2673,9 +2673,11 @@ func (s *Service) processWorkspaceChanges(ctx context.Context, changes platform.
 		return err
 	}
 	changes = dedupeWorkspaceChanges(changes)
-	if err := updateIncrementalProjections(ctx, repo, searchIndex, graphStore, s.corpusState(), changes.Changed, changes.Deleted); err != nil {
-		return projectionUpdateErr(err)
-	}
+	// A projection failure must not swallow the change notifications. Reading a
+	// note only needs the repo, so a broken search/graph projection should
+	// degrade search, not freeze the open note on stale content. The error is
+	// still returned (and surfaced as index progress) after the events go out.
+	projectionErr := updateIncrementalProjections(ctx, repo, searchIndex, graphStore, s.corpusState(), changes.Changed, changes.Deleted)
 	for _, id := range changes.Deleted {
 		s.emit("note:deleted", map[string]string{"id": string(id)})
 	}
@@ -2690,6 +2692,9 @@ func (s *Service) processWorkspaceChanges(ctx context.Context, changes platform.
 	}
 	s.markDeleted(changes.Deleted...)
 	s.markDirty(changes.Changed...)
+	if projectionErr != nil {
+		return projectionUpdateErr(projectionErr)
+	}
 	return nil
 }
 

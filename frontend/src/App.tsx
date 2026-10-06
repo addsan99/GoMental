@@ -16,6 +16,7 @@ import type {OutlineEntry} from './ui/MarkdownArticle';
 import FindBar from './ui/FindBar';
 import {basename, errorMessage} from './util';
 import {recordVisit} from './navHistory';
+import {decideRefresh} from './noteRefresh';
 import {FacetFilters, facetMatchesNote, anyFacetActive, filtersHidingNote, folderOf} from './ui/graph/filters';
 import type {FacetFilter, FacetOption} from './ui/graph/filters';
 import {DEPTH_OPTIONS, depthLabel} from './ui/graph/palette';
@@ -860,47 +861,46 @@ function App() {
         setGraphRevision((value) => value + 1);
       }, 280);
     };
-    const isDirty = draft !== savedContent;
     const offUpdated = onEvent('note:updated', (payload: NoteDTOWithVersion) => {
       // List only: this event fires while the call that caused it is still in
       // flight, so selectedID here may already be stale.
       void refreshNotes();
       bumpGraphRevision();
-      if (payload?.id !== selectedID) {
+      const incomingVersion = payload?.version ?? '';
+      // selectedIDRef rather than the closed-over selectedID, for the same
+      // reason as note:deleted below.
+      const decision = decideRefresh({
+        incomingID: payload?.id ?? '',
+        selectedID: selectedIDRef.current,
+        incomingVersion,
+        currentVersion: noteVersion,
+        incomingContent: payload?.content ?? '',
+        draft,
+        savedContent,
+      });
+      if (decision === 'ignore') {
         return;
       }
-      const incomingVersion = payload.version ?? '';
-      if (incomingVersion && incomingVersion === noteVersion) {
-        return;
-      }
-      if (payload.content === draft) {
-        // This is our own save echoing back through the watcher/event stream.
-        setSelectedNote(payload);
-        setSavedContent(payload.content);
-        setNoteVersion(incomingVersion);
-        setSaveState('saved');
-        setConflictOpen(false);
-        void fetchCurrentBacklinks(payload.id)
-          .then((links) => { if (links !== null) setBacklinks(links); })
-          .catch((err) => setError(errorMessage(err)));
-        return;
-      }
-      if (!isDirty && !isEditing) {
-        // Safe live refresh: no unsaved local edits to clobber.
-        setSelectedNote(payload);
-        setDraft(payload.content);
-        setSavedContent(payload.content);
-        setNoteVersion(incomingVersion);
-        setSaveState('saved');
-        setConflictOpen(false);
-        void fetchCurrentBacklinks(payload.id)
-          .then((links) => { if (links !== null) setBacklinks(links); })
-          .catch((err) => setError(errorMessage(err)));
-      } else {
+      if (decision === 'conflict') {
         // Someone else changed the open note while we have unsaved edits.
         setSaveState('conflict');
         setConflictOpen(true);
+        return;
       }
+      // 'echo' is our own save coming back: adopt the new version token but
+      // leave the buffer alone. 'refresh' additionally takes the new content,
+      // which is safe because there is nothing unsaved to clobber.
+      setSelectedNote(payload);
+      if (decision === 'refresh') {
+        setDraft(payload.content);
+      }
+      setSavedContent(payload.content);
+      setNoteVersion(incomingVersion);
+      setSaveState('saved');
+      setConflictOpen(false);
+      void fetchCurrentBacklinks(payload.id)
+        .then((links) => { if (links !== null) setBacklinks(links); })
+        .catch((err) => setError(errorMessage(err)));
     });
     const offDeleted = onEvent('note:deleted', (payload: {id?: string}) => {
       bumpGraphRevision();
@@ -961,7 +961,7 @@ function App() {
       offGitMerged();
       offGitError();
     };
-  }, [draft, fetchCurrentBacklinks, isEditing, loadNotes, noteVersion, refreshInfo, refreshNotes, savedContent, selectedID, showToast]);
+  }, [draft, fetchCurrentBacklinks, loadNotes, noteVersion, refreshInfo, refreshNotes, savedContent, showToast]);
 
   useEffect(() => {
     if (initialLoadRef.current) {
