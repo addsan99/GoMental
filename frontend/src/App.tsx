@@ -17,6 +17,8 @@ import FindBar from './ui/FindBar';
 import {basename, errorMessage} from './util';
 import {recordVisit} from './navHistory';
 import {decideRefresh} from './noteRefresh';
+import {shouldFlushEdits} from './autoSave';
+import type {EditSession} from './autoSave';
 import {FacetFilters, facetMatchesNote, anyFacetActive, filtersHidingNote, folderOf} from './ui/graph/filters';
 import type {FacetFilter, FacetOption} from './ui/graph/filters';
 import {DEPTH_OPTIONS, depthLabel} from './ui/graph/palette';
@@ -343,6 +345,14 @@ function App() {
   const savedFlashTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const articleScrollRef = useRef<HTMLDivElement | null>(null);
   const pendingEditNoteRef = useRef('');
+  // The editor state of the note currently on screen, so that navigating away
+  // can still write it out after the UI has moved on to the next note.
+  const editSessionRef = useRef<EditSession & {version: string}>({
+    id: '', draft: '', savedContent: '', isEditing: false, canSave: false, version: '',
+  });
+  // Set by flows that destroy or rename the open note, whose source file is
+  // already gone by the time the editor tears down.
+  const skipAutoSaveRef = useRef(false);
   // A note the app just wrote and already holds in full. Create and import know
   // the note's content, so handing it to the note-load effect lets that effect
   // skip the ReadNote round trip and populate the pane in the same commit that
@@ -909,6 +919,7 @@ function App() {
       const deletedSelected = Boolean(payload?.id) && payload.id === selectedIDRef.current;
       if (deletedSelected) {
         setDeletedNotice('This note was removed on the server.');
+        skipAutoSaveRef.current = true;
         // Only a deletion of the open note may move the selection. Falling back
         // to the first note on every deletion yanked the user off whatever they
         // were reading whenever some other note went away.
@@ -1019,6 +1030,65 @@ function App() {
     const timer = window.setTimeout(() => prefetchEditors(), 1200);
     return () => window.clearTimeout(timer);
   }, [workspace]);
+
+  // Mirrors the live editor into a ref. Declared above the note-load effect on
+  // purpose: effects run in declaration order, so this still sees the outgoing
+  // note's id while the note-load effect below is what advances selectedIDRef.
+  // That keeps the id and the buffer in the ref describing the same note.
+  useEffect(() => {
+    editSessionRef.current = {
+      id: selectedIDRef.current,
+      draft,
+      savedContent,
+      version: noteVersion,
+      isEditing,
+      canSave: !info.readOnly && !workspaceIsReadOnly(settings, workspace?.root || '') && saveState !== 'conflict',
+    };
+  });
+
+  // Writes out the open editor before a flow that moves the note's file, so the
+  // edits travel with it instead of being stranded at the old path. A failure
+  // here propagates and aborts the move rather than silently dropping work.
+  const flushOpenEdits = useCallback(async (id: string) => {
+    const session = editSessionRef.current;
+    if (!shouldFlushEdits({leaving: id, session, suppressed: false})) {
+      return;
+    }
+    await SaveNote({id, content: session.draft, baseVersion: session.version, force: false});
+  }, []);
+
+  // Auto-save on navigation. A cleanup keyed on the selection covers every way
+  // out of a note - sidebar, arrow keys, wiki links, search, graph, palette,
+  // history - plus unmount, without each callsite having to remember.
+  // Deliberately depends on selectedID alone: re-running for a changed callback
+  // identity would save mid-keystroke and leave the version token stale.
+  useEffect(() => {
+    const leaving = selectedID;
+    return () => {
+      const session = editSessionRef.current;
+      const suppressed = skipAutoSaveRef.current;
+      skipAutoSaveRef.current = false;
+      if (!shouldFlushEdits({leaving, session, suppressed})) {
+        return;
+      }
+      const {id, draft: pending, version} = session;
+      // SaveNote directly rather than saveCurrentNote: that path can raise the
+      // suggested-links review modal, which makes no sense once the user has
+      // already moved to another note.
+      void SaveNote({id, content: pending, baseVersion: version, force: false})
+        .then(() => {
+          showToast(`Saved ${basename(id)}`);
+          void refreshNotes();
+        })
+        .catch((err) => {
+          // The buffer is gone from the editor by now, so failing quietly would
+          // read as silent data loss.
+          setError(`Could not auto-save ${basename(id)}: ${errorMessage(err)}`);
+          showToast(`Could not save ${basename(id)}`);
+        });
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedID]);
 
   useEffect(() => {
     const requestID = noteRequestRef.current + 1;
@@ -1215,6 +1285,7 @@ function App() {
       await DeleteNote(deletedID);
       const remaining = notes.filter((note) => note.id !== deletedID);
       const nextID = remaining[0]?.id || '';
+      skipAutoSaveRef.current = true;
       setSelectedID(nextID);
       setSelectedNote(null);
       setDraft('');
@@ -1280,9 +1351,11 @@ function App() {
     setBusy('Moving note');
     setError('');
     try {
+      await flushOpenEdits(id);
       const moved = await MoveNote({id, newId: nextID});
       if (selectedID === id) {
         pendingEditNoteRef.current = isEditing ? moved.id : '';
+        skipAutoSaveRef.current = true;
         setSelectedID(moved.id);
       }
       setDeletedNotice('');
@@ -1294,7 +1367,7 @@ function App() {
     } finally {
       setBusy('');
     }
-  }, [busy, info.readOnly, isEditing, loadNotes, notes, projectionActive, selectedID, settings, showToast, workspace]);
+  }, [busy, flushOpenEdits, info.readOnly, isEditing, loadNotes, notes, projectionActive, selectedID, settings, showToast, workspace]);
 
   // Context-menu actions from the sidebar tree. These act on the right-clicked
   // note rather than the selected one, so each resets view state only when the
@@ -1345,9 +1418,11 @@ function App() {
       setBusy('Renaming note');
       setError('');
       try {
+        await flushOpenEdits(id);
         const moved = await MoveNote({id, newId: nextID});
         if (selectedID === id) {
           pendingEditNoteRef.current = isEditing ? moved.id : '';
+          skipAutoSaveRef.current = true;
           setSelectedID(moved.id);
         }
         setDeletedNotice('');
@@ -1377,6 +1452,7 @@ function App() {
       let nextID = selectedID;
       if (selectedID === id) {
         nextID = notes.find((note) => note.id !== id)?.id || '';
+        skipAutoSaveRef.current = true;
         setSelectedID(nextID);
         setSelectedNote(null);
         setDraft('');
@@ -1397,7 +1473,7 @@ function App() {
     } finally {
       setBusy('');
     }
-  }, [busy, info.readOnly, isEditing, loadNotes, notes, projectionActive, selectedID, settings, showToast, workspace?.root]);
+  }, [busy, flushOpenEdits, info.readOnly, isEditing, loadNotes, notes, projectionActive, selectedID, settings, showToast, workspace?.root]);
 
   const reloadFromServer = useCallback(async () => {
     if (!selectedID) {
