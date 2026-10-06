@@ -6,6 +6,8 @@ import {Fragment, useEffect, useState} from 'react';
 import type {ReactNode} from 'react';
 import {BulbIcon} from './icons';
 import {MermaidDiagram} from './MermaidDiagram';
+import {alignOf, parseTableAlignment} from './tableAlign';
+import type {ColumnAlign} from './tableAlign';
 
 export type OutlineEntry = {anchor: string; text: string};
 
@@ -22,7 +24,7 @@ type Block =
   | {t: 'h2'; text: string; anchor: string}
   | {t: 'h3'; text: string}
   | {t: 'p'; text: string}
-  | {t: 'table'; head: string[]; rows: string[][]}
+  | {t: 'table'; head: string[]; rows: string[][]; align: ColumnAlign[]}
   | {t: 'steps'; items: {text: string; subs: string[]}[]}
   | {t: 'list'; items: {text: string; depth: number}[]}
   | {t: 'callout'; title: string; text: string}
@@ -104,13 +106,14 @@ export function parseArticle(rawContent: string, fallbackTitle: string): Article
     // Tables (GitHub-flavoured): header row, delimiter row, then body rows.
     if (trimmed.startsWith('|') && i + 1 < lines.length && /^\s*\|?[\s:|-]+\|?\s*$/.test(lines[i + 1]) && lines[i + 1].includes('-')) {
       const head = splitTableRow(trimmed);
+      const align = parseTableAlignment(lines[i + 1]);
       i += 2;
       const rows: string[][] = [];
       while (i < lines.length && lines[i].trim().startsWith('|')) {
         rows.push(splitTableRow(lines[i].trim()));
         i += 1;
       }
-      blocks.push({t: 'table', head, rows});
+      blocks.push({t: 'table', head, rows, align});
       continue;
     }
 
@@ -637,7 +640,7 @@ export function MarkdownArticle({model, tags, noteID, onNavigate, theme = 'light
                   <thead>
                     <tr>
                       {block.head.map((cell, ci) => (
-                        <th className={ci === 0 ? 'gm-th' : 'gm-th gm-th-num'} key={ci}>
+                        <th className={`gm-th gm-col-${alignOf(block.align, ci)}`} key={ci}>
                           {cell}
                         </th>
                       ))}
@@ -647,7 +650,7 @@ export function MarkdownArticle({model, tags, noteID, onNavigate, theme = 'light
                     {block.rows.map((row, ri) => (
                       <tr key={ri}>
                         {row.map((cell, ci) => (
-                          <td className={ci === 0 ? 'gm-td' : 'gm-td gm-td-num'} key={ci}>
+                          <td className={`gm-td gm-col-${alignOf(block.align, ci)}`} key={ci}>
                             {renderInline(cell, onNavigate, `${key}-${ri}-${ci}`)}
                           </td>
                         ))}

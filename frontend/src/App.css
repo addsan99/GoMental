@@ -958,10 +958,15 @@ body.gm-resizing * { cursor: col-resize !important; }
 .gm-table { width: max-content; min-width: 100%; border-collapse: collapse; }
 .gm-table thead tr { background: var(--surface-2); }
 .gm-th { min-width: 10rem; padding: 11px 16px; text-align: left; font: 600 12px/1 var(--font-ui); letter-spacing: .03em; text-transform: uppercase; color: var(--text-3); }
-.gm-th-num { text-align: right; }
 .gm-table tbody tr { border-top: 1px solid var(--border); }
 .gm-td { min-width: 10rem; padding: 11px 16px; text-align: left; font: 400 15px/1.5 var(--font-read); color: var(--text); }
-.gm-td-num { text-align: right; font-weight: 500; color: var(--text-2); font-variant-numeric: tabular-nums; white-space: nowrap; }
+/* Alignment comes from the markdown delimiter row (|---|---:|:--:|). Columns
+   with no explicit alignment stay left, so prose tables read naturally; only a
+   column the author marked right-aligned gets the numeric treatment. */
+.gm-col-left { text-align: left; }
+.gm-col-center { text-align: center; }
+.gm-col-right { text-align: right; }
+td.gm-col-right { font-variant-numeric: tabular-nums; white-space: nowrap; }
 
 .gm-steps { display: flex; flex-direction: column; gap: 14px; margin: 6px 0 24px; }
 .gm-step { display: flex; gap: 14px; }
