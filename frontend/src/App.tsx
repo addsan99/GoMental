@@ -18,6 +18,8 @@ import {basename, errorMessage} from './util';
 import {recordVisit} from './navHistory';
 import {decideRefresh} from './noteRefresh';
 import {shouldFlushEdits} from './autoSave';
+import {NOTE_SORTS, groupByRecency, isNoteSort} from './noteSort';
+import type {NoteSort} from './noteSort';
 import type {EditSession} from './autoSave';
 import {FacetFilters, facetMatchesNote, anyFacetActive, filtersHidingNote, folderOf} from './ui/graph/filters';
 import type {FacetFilter, FacetOption} from './ui/graph/filters';
@@ -273,6 +275,10 @@ function App() {
   // Facet selection (Types / Tags / Folders), owned here and shared by the right-rail
   // filter panel, the note-list tree (hides non-matches), and both graph instances.
   const [facets, setFacets] = useState<FacetFilter>({types: [], tags: [], folders: [], favorites: false});
+  const [noteSort, setNoteSort] = useState<NoteSort>(initialNoteSort);
+  // Re-read on a timer so "Today" rolls over and the 24h window keeps moving
+  // while the app is left open. A minute is far finer than any bucket edge.
+  const [clockTick, setClockTick] = useState(() => Date.now());
   // Declared here rather than beside the note-list filter below because the
   // search effect reads it too, and hook dependency arrays evaluate in order.
   const facetsActive = anyFacetActive(facets);
@@ -1849,7 +1855,12 @@ function App() {
   );
   const matchCount = facetsActive ? visibleNotes.length : notes.length;
 
-  const tree = useMemo(() => groupNotes(visibleNotes), [visibleNotes]);
+  // Sorting by name keeps the folder hierarchy; sorting by recency replaces it
+  // with time buckets, since a note's folder says nothing about when it changed.
+  const tree = useMemo(
+    () => (noteSort === 'recent' ? groupByRecency(visibleNotes, clockTick) : groupNotes(visibleNotes)),
+    [visibleNotes, noteSort, clockTick],
+  );
   const selectedNoteReady = Boolean(selectedNote && selectedNote.id === selectedID);
   const noteSummaryForSelected = notes.find((note) => note.id === selectedID);
   const selectedTags = noteSummaryForSelected?.tags || [];
@@ -1948,6 +1959,24 @@ function App() {
       // Ignore storage failures.
     }
   }, [railCollapsed]);
+  useEffect(() => {
+    try {
+      localStorage.setItem('gm-note-sort', noteSort);
+    } catch {
+      // Ignore: a blocked localStorage only costs the preference.
+    }
+  }, [noteSort]);
+
+  // Only runs while the clock actually matters; sorting by name needs no ticks.
+  useEffect(() => {
+    if (noteSort !== 'recent' && !facets.recent) {
+      return;
+    }
+    setClockTick(Date.now());
+    const timer = window.setInterval(() => setClockTick(Date.now()), 60_000);
+    return () => window.clearInterval(timer);
+  }, [noteSort, facets.recent]);
+
   useEffect(() => {
     try {
       localStorage.setItem('gm-graph-mode', graphMode);
@@ -2289,6 +2318,19 @@ function App() {
               <div className="gm-notes-label">
                 <span className="gm-section-title">Notes</span>
                 <span className="gm-notes-count">{noteCount}</span>
+                <label className="gm-note-sort">
+                  <span className="gm-sr-only">Sort notes by</span>
+                  <select
+                    value={noteSort}
+                    onChange={(event) => setNoteSort(event.target.value as NoteSort)}
+                    disabled={!workspace}
+                    title="Sort notes"
+                  >
+                    {NOTE_SORTS.map((option) => (
+                      <option key={option.value} value={option.value}>{option.label}</option>
+                    ))}
+                  </select>
+                </label>
               </div>
               <div className="gm-sidebar-actions">
                 <button
@@ -2413,6 +2455,7 @@ function App() {
             ) : (
               <SidebarNoteTree
                 tree={tree}
+                ordered={noteSort === 'recent'}
                 expanded={expanded}
                 selectedID={selectedID}
                 activeTab={activeTab}
@@ -4180,6 +4223,15 @@ function groupNotes(notes: application.NoteSummaryDTO[]): TreeGroup[] {
     name,
     notes: items.sort((a, b) => a.id.localeCompare(b.id)),
   }));
+}
+
+function initialNoteSort(): NoteSort {
+  try {
+    const stored = localStorage.getItem('gm-note-sort');
+    return isNoteSort(stored) ? stored : 'name';
+  } catch {
+    return 'name';
+  }
 }
 
 function clamp(value: number, min: number, max: number): number {

@@ -10,6 +10,9 @@ export interface FacetFilter {
   tags: string[]
   folders: string[]
   favorites: boolean
+  // Rolling recent-activity window. Optional so the many existing facet
+  // literals stay valid; absent means "not filtering by time".
+  recent?: boolean
 }
 
 export interface GraphViewState {

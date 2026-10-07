@@ -1,6 +1,6 @@
 import {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import type {CSSProperties, DragEvent, KeyboardEvent} from 'react';
-import {ChevronIcon, FileIcon, FolderIcon, StarIcon} from './icons';
+import {ChevronIcon, ClockIcon, FileIcon, FolderIcon, StarIcon} from './icons';
 import {useNoteActionMenu} from './NoteActionMenu';
 import type {NoteTreeAction} from './NoteActionMenu';
 import {basename} from '../util';
@@ -82,10 +82,16 @@ function buildTree(groups: TreeGroup[]): FolderNode {
 // flattenTree turns the folder tree into a flat, ordered row list so it can be
 // windowed. A collapsed folder contributes only its own header row, hiding its
 // whole subtree rather than just the notes filed directly in it.
-function flattenTree(root: FolderNode, expanded: Record<string, boolean>): FlatRow[] {
+function flattenTree(root: FolderNode, expanded: Record<string, boolean>, ordered = false): FlatRow[] {
   const rows: FlatRow[] = [];
   const walk = (node: FolderNode, depth: number) => {
-    const folders = Array.from(node.children.values()).sort((a, b) => a.name.localeCompare(b.name));
+    // Folders normally read best alphabetically, but time buckets carry their
+    // own meaningful order ("Today" before "Older"), which sorting would
+    // scramble. `ordered` keeps the Map's insertion order, i.e. the caller's.
+    const folders = Array.from(node.children.values());
+    if (!ordered) {
+      folders.sort((a, b) => a.name.localeCompare(b.name));
+    }
     for (const child of folders) {
       const open = expanded[child.path] !== false;
       rows.push({kind: 'folder', key: `folder:${child.path}`, path: child.path, name: child.name, depth, count: child.total, open});
@@ -113,6 +119,7 @@ export default function SidebarNoteTree({
   onMoveNote,
   onNoteAction,
   moveDisabled = false,
+  ordered = false,
 }: {
   tree: TreeGroup[];
   expanded: Record<string, boolean>;
@@ -125,8 +132,10 @@ export default function SidebarNoteTree({
   onMoveNote?: (id: string, folder: string) => void;
   onNoteAction?: (action: NoteTreeAction, id: string) => void;
   moveDisabled?: boolean;
+  /** Keep the caller's group order instead of sorting folders by name. */
+  ordered?: boolean;
 }) {
-  const rows = useMemo(() => flattenTree(buildTree(tree), expanded), [tree, expanded]);
+  const rows = useMemo(() => flattenTree(buildTree(tree), expanded, ordered), [tree, expanded, ordered]);
   const navRef = useRef<HTMLElement | null>(null);
   const rowRefs = useRef(new Map<string, HTMLElement>());
   const [scrollTop, setScrollTop] = useState(0);
@@ -140,7 +149,9 @@ export default function SidebarNoteTree({
 
   const virtualize = rows.length > VIRTUALIZE_THRESHOLD;
 
-  const canMove = Boolean(onMoveNote) && !moveDisabled;
+  // Not in ordered mode: there the "folders" are time buckets, so dropping a
+  // note on one would file it into a folder literally named "Today".
+  const canMove = Boolean(onMoveNote) && !moveDisabled && !ordered;
   // "Copy full path" is a read-only lookup, so the menu stays useful in
   // read-only workspaces even though the mutating entries are disabled there.
   const canMutate = Boolean(onNoteAction) && !moveDisabled;
@@ -366,7 +377,9 @@ export default function SidebarNoteTree({
           onDrop={(event) => handleDrop(event, row.path)}
         >
           <span className={row.open ? 'gm-chevron open' : 'gm-chevron'}><ChevronIcon size={11} /></span>
-          <FolderIcon size={13} className="gm-tree-folder-icon" />
+          {ordered
+            ? <ClockIcon size={13} className="gm-tree-folder-icon" />
+            : <FolderIcon size={13} className="gm-tree-folder-icon" />}
           <span className="gm-tree-label">{row.name}</span>
           <span className="gm-tree-count">{row.count}</span>
         </button>

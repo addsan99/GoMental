@@ -36,7 +36,7 @@ import {
 import {reportStats} from './graph/stats';
 import {layoutEngineFor} from './graph/layout';
 import type {Hull, LayoutEdge, LayoutNode} from './graph/layout';
-import {GraphFilterPanel, defaultGraphViewState, toGraphQueryDTO, folderOf, facetMatchesNote} from './graph/filters';
+import {GraphFilterPanel, defaultGraphViewState, toGraphQueryDTO, folderOf, facetMatchesNote, anyFacetActive} from './graph/filters';
 import type {GraphViewState, FacetFilter} from './graph/filters';
 import {errorMessage} from '../util';
 
@@ -1190,7 +1190,7 @@ export function GraphView3D({
     let total = 0;
     let match = 0;
     const facets = viewState.facets;
-    const anyFacet = facets.types.length > 0 || facets.tags.length > 0 || facets.folders.length > 0 || facets.favorites;
+    const anyFacet = anyFacetActive(facets);
     for (const node of data.nodes) {
       if (HUB_NODE_KINDS.has(node.kind) || node.kind === 'unresolved') {
         continue;

@@ -500,6 +500,31 @@ body.gm-resizing * { cursor: col-resize !important; }
   color: var(--text-3);
 }
 .gm-notes-count { font: 500 12px/1 var(--font-mono); color: var(--text-3); }
+
+/* Visually hidden, still read aloud. The sort control is identified by its
+   adjacent label for sighted users, so the <span> only needs to exist for AT. */
+.gm-sr-only {
+  position: absolute;
+  width: 1px; height: 1px;
+  margin: -1px; padding: 0; border: 0;
+  overflow: hidden; clip-path: inset(50%); white-space: nowrap;
+}
+
+/* Sits beside the note count, so it stays quiet until hovered. */
+.gm-note-sort { display: flex; align-items: baseline; }
+.gm-note-sort select {
+  appearance: none;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  padding: 1px 4px;
+  font: 500 11px/1.4 var(--font-ui);
+  color: var(--text-3);
+  cursor: pointer;
+}
+.gm-note-sort select:hover { border-color: var(--line-2); color: var(--text-2); }
+.gm-note-sort select:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.gm-note-sort select:disabled { opacity: 0.4; cursor: default; }
 .gm-sidebar-actions { display: flex; gap: 6px; }
 
 .gm-search-field { position: relative; }

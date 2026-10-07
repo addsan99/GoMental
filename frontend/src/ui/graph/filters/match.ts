@@ -2,6 +2,7 @@
 // App note-list filter, so the two never drift apart.
 import type {application} from '../../../../wailsjs/go/models'
 import type {FacetFilter} from './types'
+import {isRecentNote} from '../../../noteSort'
 
 // Top-level folder segment of a note path (the grouping/facet key for folders).
 export function folderOf(path: string): string {
@@ -30,12 +31,21 @@ export function facetMatchesNote(note: application.NoteSummaryDTO | undefined, f
   if (facets.favorites && !note.favorite) {
     return false
   }
+  // `now` is read per call rather than captured, so a long-running window keeps
+  // agreeing with the clock instead of freezing at mount time.
+  if (facets.recent && !isRecentNote(note.modifiedAt, Date.now())) {
+    return false
+  }
   return true
 }
 
 // True when any facet axis has a selection (so callers can short-circuit).
 export function anyFacetActive(facets: FacetFilter): boolean {
-  return facets.types.length > 0 || facets.tags.length > 0 || facets.folders.length > 0 || facets.favorites
+  return facets.types.length > 0
+    || facets.tags.length > 0
+    || facets.folders.length > 0
+    || facets.favorites
+    || Boolean(facets.recent)
 }
 
 // Which display filters would hide a note the app just created or imported.

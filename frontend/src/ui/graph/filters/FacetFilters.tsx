@@ -7,7 +7,9 @@ import type {CSSProperties} from 'react'
 import type {FacetFilter} from './types'
 
 type FacetAxis = keyof FacetFilter
-type ListFacetAxis = Exclude<FacetAxis, 'favorites'>
+// The axes rendered as checkable value lists. The boolean axes are toggles with
+// no values to list, so they are excluded rather than special-cased below.
+type ListFacetAxis = Exclude<FacetAxis, 'favorites' | 'recent'>
 
 // A selectable facet value plus the number of notes carrying it (for ranking and
 // the count badge).
@@ -141,7 +143,7 @@ export function FacetFilters(props: FacetFiltersProps) {
   return (
     <div className="gm-facet-filters">
       <div className="gm-graph-opt">
-        <span className="gm-graph-opt-label">Favorites</span>
+        <span className="gm-graph-opt-label">Activity</span>
         <label className="gm-graph-check">
           <input
             type="checkbox"
@@ -149,6 +151,14 @@ export function FacetFilters(props: FacetFiltersProps) {
             onChange={() => onChange({...facets, favorites: !facets.favorites})}
           />
           Starred notes
+        </label>
+        <label className="gm-graph-check">
+          <input
+            type="checkbox"
+            checked={Boolean(facets.recent)}
+            onChange={() => onChange({...facets, recent: !facets.recent})}
+          />
+          Touched in the last 24h
         </label>
       </div>
       {renderFacetGroup('types', 'Types', available.types)}
