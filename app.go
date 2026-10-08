@@ -453,6 +453,33 @@ func (a *App) NoteFilePath(id string) (string, error) {
 	return a.service().NoteFilePath(a.context(), id)
 }
 
+// FolderPath resolves a workspace folder to an absolute path. Read-only, so it
+// stays available alongside NoteFilePath in viewer builds.
+func (a *App) FolderPath(folder string) (string, error) {
+	return a.service().FolderPath(a.context(), folder)
+}
+
+// RevealFolder opens a workspace folder in Finder/Explorer. The folder is
+// resolved through the service first so only a path inside the open workspace
+// can ever be handed to the file manager.
+func (a *App) RevealFolder(folder string) error {
+	path, err := a.service().FolderPath(a.context(), folder)
+	if err != nil {
+		return err
+	}
+	return revealFolder(path)
+}
+
+// CreateFolder adds an empty folder to the workspace. Nothing is committed to
+// git: an empty directory is not something git can track, so the folder reaches
+// the repository with the first note filed into it.
+func (a *App) CreateFolder(req application.CreateFolderRequest) (application.FolderDTO, error) {
+	if a.writesBlocked() {
+		return application.FolderDTO{}, errReadOnly
+	}
+	return a.service().CreateFolder(a.context(), req)
+}
+
 func (a *App) DeleteNote(id string) error {
 	if a.writesBlocked() {
 		return errReadOnly

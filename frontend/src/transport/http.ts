@@ -151,6 +151,27 @@ export async function NoteFilePath(id: string): Promise<string> {
   return result.path
 }
 
+// Folder operations are desktop-only. The server's filesystem is not the one the
+// person in the browser is looking at, so revealing a folder there would open a
+// window on someone else's machine; the other two are withheld with it rather
+// than offering half a menu.
+const folderOpsUnavailable = () =>
+  Promise.reject(new Error('folder actions are only available in the desktop app'))
+
+export function FolderPath(_folder: string): Promise<string> {
+  return folderOpsUnavailable()
+}
+
+export function RevealFolder(_folder: string): Promise<void> {
+  return folderOpsUnavailable()
+}
+
+export function CreateFolder(_req: {parent: string; name: string}): Promise<{folder: string; path: string}> {
+  return folderOpsUnavailable()
+}
+
+export const isDesktop = false
+
 export function Search(req: application.SearchQueryDTO): Promise<Array<application.SearchResultDTO>> {
   return request('/api/search', {method: 'POST', ...jsonBody(req)})
 }

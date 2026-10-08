@@ -91,6 +91,32 @@ export function NoteFilePath(id: string): Promise<string> {
   return app.NoteFilePath(id)
 }
 
+// Folder operations use the same dynamic-call pattern as NoteFilePath above,
+// for the same build-order reason.
+export function FolderPath(folder: string): Promise<string> {
+  const app = (window as any)?.go?.main?.App
+  if (!app || typeof app.FolderPath !== 'function') {
+    return Promise.reject(new Error('folder paths are not available in this build'))
+  }
+  return app.FolderPath(folder)
+}
+
+export function RevealFolder(folder: string): Promise<void> {
+  const app = (window as any)?.go?.main?.App
+  if (!app || typeof app.RevealFolder !== 'function') {
+    return Promise.reject(new Error('opening a folder is not available in this build'))
+  }
+  return app.RevealFolder(folder)
+}
+
+export function CreateFolder(req: {parent: string; name: string}): Promise<{folder: string; path: string}> {
+  const app = (window as any)?.go?.main?.App
+  if (!app || typeof app.CreateFolder !== 'function') {
+    return Promise.reject(new Error('creating folders is not available in this build'))
+  }
+  return app.CreateFolder(req)
+}
+
 // GitSync is only bound in viewer git mode. It is called dynamically (not via the
 // generated bindings) so the generated module does not need regenerating; the
 // desktop default build simply never exposes window.go.main.App.GitSync.
@@ -186,3 +212,7 @@ export function SaveComposite(memberRoots: string[]): Promise<GoMentalComposite>
   }
   return app.SaveComposite(memberRoots)
 }
+
+// The Wails bridge runs beside the user's own filesystem, which is what makes
+// reveal-in-file-manager meaningful. The browser viewer does not.
+export const isDesktop = true

@@ -1,8 +1,8 @@
 import {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import type {CSSProperties, DragEvent, KeyboardEvent} from 'react';
 import {ChevronIcon, ClockIcon, FileIcon, FolderIcon, StarIcon} from './icons';
-import {useNoteActionMenu} from './NoteActionMenu';
-import type {NoteTreeAction} from './NoteActionMenu';
+import {useFolderActionMenu, useNoteActionMenu} from './NoteActionMenu';
+import type {FolderTreeAction, NoteTreeAction} from './NoteActionMenu';
 import {basename} from '../util';
 import type {application} from '../../wailsjs/go/models';
 
@@ -11,7 +11,7 @@ export type TreeGroup = {
   notes: application.NoteSummaryDTO[];
 };
 
-export type {NoteTreeAction} from './NoteActionMenu';
+export type {FolderTreeAction, NoteTreeAction} from './NoteActionMenu';
 
 type FolderRow = {kind: 'folder'; key: string; path: string; name: string; depth: number; count: number; open: boolean};
 type FileRow = {kind: 'file'; key: string; note: application.NoteSummaryDTO; depth: number};
@@ -118,6 +118,7 @@ export default function SidebarNoteTree({
   onToggleFavorite,
   onMoveNote,
   onNoteAction,
+  onFolderAction,
   moveDisabled = false,
   ordered = false,
 }: {
@@ -131,6 +132,7 @@ export default function SidebarNoteTree({
   onToggleFavorite?: (id: string, favorite: boolean) => void;
   onMoveNote?: (id: string, folder: string) => void;
   onNoteAction?: (action: NoteTreeAction, id: string) => void;
+  onFolderAction?: (action: FolderTreeAction, folder: string) => void;
   moveDisabled?: boolean;
   /** Keep the caller's group order instead of sorting folders by name. */
   ordered?: boolean;
@@ -157,6 +159,14 @@ export default function SidebarNoteTree({
   const canMutate = Boolean(onNoteAction) && !moveDisabled;
 
   const {openMenu, element: contextMenu} = useNoteActionMenu({onNoteAction, canMutate});
+  // Suppressed in ordered mode for the same reason as dropping: the rows there
+  // are time buckets, and "new child folder" inside "Today" means nothing.
+  const {openMenu: openFolderMenu, element: folderMenu} = useFolderActionMenu({
+    onFolderAction: ordered ? undefined : onFolderAction,
+    // Not `canMutate`: that one is gated on the note menu being wired up, which
+    // has nothing to say about whether a folder can be added to.
+    canMutate: !moveDisabled,
+  });
 
   const handleDragStart = (event: DragEvent, id: string) => {
     if (!canMove) {
@@ -372,6 +382,7 @@ export default function SidebarNoteTree({
             focusOnClick(event);
             onToggleFolder(row.path);
           }}
+          onContextMenu={(event) => openFolderMenu(event, row.path)}
           onDragOver={(event) => handleDragOver(event, row.path)}
           onDragLeave={() => setDropFolder((current) => current === row.path ? null : current)}
           onDrop={(event) => handleDrop(event, row.path)}
@@ -450,6 +461,7 @@ export default function SidebarNoteTree({
       >
         {rows.map(renderRow)}
         {contextMenu}
+        {folderMenu}
       </nav>
     );
   }
@@ -474,6 +486,7 @@ export default function SidebarNoteTree({
         {rows.slice(start, end).map((row, offset) => renderRow(row, start + offset))}
       </div>
       {contextMenu}
+      {folderMenu}
     </nav>
   );
 }

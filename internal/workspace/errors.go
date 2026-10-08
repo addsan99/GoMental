@@ -5,6 +5,8 @@ import "errors"
 var (
 	ErrInvalidWorkspaceRoot = errors.New("invalid workspace root")
 	ErrInvalidNoteID        = errors.New("invalid note id")
+	ErrInvalidFolder        = errors.New("invalid folder")
+	ErrFolderAlreadyExists  = errors.New("folder already exists")
 	ErrPathEscapesWorkspace = errors.New("path escapes workspace")
 	ErrReservedNoteID       = errors.New("reserved OKF document cannot be used as a concept note")
 	ErrDuplicateNoteID      = errors.New("duplicate note id")

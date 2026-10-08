@@ -6,7 +6,7 @@ import type {CodeMirrorEditorHandle} from './CodeMirrorEditor';
 import CommandPalette from './ui/CommandPalette';
 import LinkPicker from './ui/LinkPicker';
 import SidebarNoteTree from './ui/SidebarNoteTree';
-import type {NoteTreeAction} from './ui/SidebarNoteTree';
+import type {FolderTreeAction, NoteTreeAction} from './ui/SidebarNoteTree';
 import {useNoteActionMenu} from './ui/NoteActionMenu';
 import Toast from './ui/Toast';
 import NoteContextMenu from './ui/NoteContextMenu';
@@ -50,11 +50,13 @@ import {
 import {
   Backlinks,
   Composite,
+  CreateFolder,
   DeleteNote,
   DeleteNoteType,
   GitMergePullRequest,
   GitOpenPullRequest,
   GitSync,
+  FolderPath,
   Info,
   ImportURL,
   ImportNoteTypeCollection,
@@ -69,6 +71,7 @@ import {
   ReadNote,
   Rebuild,
   RecentWorkspaces,
+  RevealFolder,
   SaveComposite,
   SaveNote,
   SaveNoteType,
@@ -81,6 +84,7 @@ import {
   SelectImportFile,
   SelectWorkspaceDirectory,
   WorkspaceMembers,
+  isDesktop,
   onEvent,
 } from './transport';
 import type {application} from '../wailsjs/go/models';
@@ -313,6 +317,11 @@ function App() {
   // New UI-only state for the redesigned shell.
   const [rawMode, setRawMode] = useState(false);
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
+  // Folders created from the tree that hold no notes yet. The tree is derived
+  // from the notes, so a brand-new folder has nothing to derive it from and
+  // would be invisible — which is also the moment it is most needed, as the
+  // drop target for the note about to go in it.
+  const [newFolders, setNewFolders] = useState<string[]>([]);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [linkPickerOpen, setLinkPickerOpen] = useState(false);
   const [linkLabelDefault, setLinkLabelDefault] = useState('');
@@ -609,6 +618,9 @@ function App() {
     setSavedContent('');
     setBacklinks([]);
     setNotes([]);
+    // These are placeholders for the workspace being closed, not the one being
+    // opened, where the same paths could mean something else entirely.
+    setNewFolders([]);
     setSearchResults([]);
     setSearchStatus('idle');
     try {
@@ -1375,6 +1387,56 @@ function App() {
     }
   }, [busy, flushOpenEdits, info.readOnly, isEditing, loadNotes, notes, projectionActive, selectedID, settings, showToast, workspace]);
 
+  // Context-menu actions from a folder row. A folder is a directory rather than
+  // a note, so "copy as path" and reveal stay available even where the note
+  // operations are blocked: both are read-only lookups.
+  const handleFolderTreeAction = useCallback(async (action: FolderTreeAction, folder: string) => {
+    if (!folder) {
+      return;
+    }
+    setError('');
+    if (action === 'copyPath') {
+      try {
+        await navigator.clipboard.writeText(await FolderPath(folder));
+        showToast('Folder path copied');
+      } catch (err) {
+        setError(errorMessage(err));
+      }
+      return;
+    }
+    if (action === 'reveal') {
+      try {
+        await RevealFolder(folder);
+      } catch (err) {
+        setError(errorMessage(err));
+      }
+      return;
+    }
+
+    const writable = !info.readOnly && !workspaceIsReadOnly(settings, workspace?.root || '') && !busy && !projectionActive;
+    if (!writable) {
+      return;
+    }
+    const name = await promptDialog({
+      title: `New folder in “${folder}”`,
+      message: 'Enter a name for the new folder.',
+      confirmLabel: 'Create',
+    });
+    if (name === null || !name.trim()) {
+      return;
+    }
+    try {
+      const created = await CreateFolder({parent: folder, name: name.trim()});
+      setNewFolders((current) => current.includes(created.folder) ? current : current.concat(created.folder));
+      // The parent may have been collapsed when it was right-clicked, which
+      // would hide the folder that was just asked for.
+      setExpanded((current) => ({...current, [folder]: true}));
+      showToast('Folder created');
+    } catch (err) {
+      setError(errorMessage(err));
+    }
+  }, [busy, info.readOnly, projectionActive, settings, showToast, workspace]);
+
   // Context-menu actions from the sidebar tree. These act on the right-clicked
   // note rather than the selected one, so each resets view state only when the
   // note it touches happens to be the one on screen.
@@ -1858,8 +1920,10 @@ function App() {
   // Sorting by name keeps the folder hierarchy; sorting by recency replaces it
   // with time buckets, since a note's folder says nothing about when it changed.
   const tree = useMemo(
-    () => (noteSort === 'recent' ? groupByRecency(visibleNotes, clockTick) : groupNotes(visibleNotes)),
-    [visibleNotes, noteSort, clockTick],
+    () => (noteSort === 'recent'
+      ? groupByRecency(visibleNotes, clockTick)
+      : withEmptyFolders(groupNotes(visibleNotes), newFolders)),
+    [visibleNotes, noteSort, clockTick, newFolders],
   );
   const selectedNoteReady = Boolean(selectedNote && selectedNote.id === selectedID);
   const noteSummaryForSelected = notes.find((note) => note.id === selectedID);
@@ -2465,6 +2529,7 @@ function App() {
                 onToggleFavorite={toggleNoteFavorite}
                 onMoveNote={moveNoteToFolder}
                 onNoteAction={handleNoteTreeAction}
+                onFolderAction={isDesktop ? handleFolderTreeAction : undefined}
                 moveDisabled={readOnly || interactionBusy}
               />
             )}
@@ -4223,6 +4288,20 @@ function groupNotes(notes: application.NoteSummaryDTO[]): TreeGroup[] {
     name,
     notes: items.sort((a, b) => a.id.localeCompare(b.id)),
   }));
+}
+
+// withEmptyFolders folds freshly created, still-empty folders into the groups
+// derived from the notes. A folder that already holds a note, or that is an
+// ancestor of one, is left alone: it is in the tree already, and adding it
+// again would only duplicate the group.
+function withEmptyFolders(groups: TreeGroup[], folders: string[]): TreeGroup[] {
+  if (folders.length === 0) {
+    return groups;
+  }
+  const covered = (folder: string) =>
+    groups.some((group) => group.name === folder || group.name.startsWith(`${folder}/`));
+  const extra = folders.filter((folder) => !covered(folder)).map((name) => ({name, notes: []}));
+  return extra.length > 0 ? groups.concat(extra) : groups;
 }
 
 function initialNoteSort(): NoteSort {
